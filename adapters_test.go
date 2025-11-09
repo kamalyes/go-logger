@@ -13,6 +13,7 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -618,6 +619,45 @@ func (m *MockAdapter) WithFields(fields map[string]interface{}) ILogger {
 func (m *MockAdapter) WithError(err error) ILogger {
 	return m.WithField("error", err)
 }
+
+// 新增的接口方法实现
+
+// 纯文本日志方法
+func (m *MockAdapter) DebugMsg(msg string) {}
+func (m *MockAdapter) InfoMsg(msg string)  {}
+func (m *MockAdapter) WarnMsg(msg string)  {}
+func (m *MockAdapter) ErrorMsg(msg string) {}
+func (m *MockAdapter) FatalMsg(msg string) {}
+
+// 带上下文的日志方法
+func (m *MockAdapter) DebugContext(ctx context.Context, format string, args ...interface{}) {}
+func (m *MockAdapter) InfoContext(ctx context.Context, format string, args ...interface{})  {}
+func (m *MockAdapter) WarnContext(ctx context.Context, format string, args ...interface{})  {}
+func (m *MockAdapter) ErrorContext(ctx context.Context, format string, args ...interface{}) {}
+func (m *MockAdapter) FatalContext(ctx context.Context, format string, args ...interface{}) {}
+
+// 结构化日志方法（键值对）
+func (m *MockAdapter) DebugKV(msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) InfoKV(msg string, keysAndValues ...interface{})  {}
+func (m *MockAdapter) WarnKV(msg string, keysAndValues ...interface{})  {}
+func (m *MockAdapter) ErrorKV(msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) FatalKV(msg string, keysAndValues ...interface{}) {}
+
+// 原始日志条目方法
+func (m *MockAdapter) Log(level LogLevel, msg string) {}
+func (m *MockAdapter) LogContext(ctx context.Context, level LogLevel, msg string) {}
+func (m *MockAdapter) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {}
+
+// WithContext 的实现
+func (m *MockAdapter) WithContext(ctx context.Context) ILogger {
+	return m
+}
+
+// 兼容标准log包的方法
+func (m *MockAdapter) Print(args ...interface{}) {}
+func (m *MockAdapter) Printf(format string, args ...interface{}) {}
+func (m *MockAdapter) Println(args ...interface{}) {}
 
 func (m *MockAdapter) Clone() ILogger {
 	clone := &MockAdapter{

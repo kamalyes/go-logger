@@ -1,9 +1,9 @@
 # Go Logger Examples Makefile
 
-.PHONY: all basic adapters factory benchmark configuration clean help
+.PHONY: all basic adapters factory benchmark configuration enhanced context compatibility clean help
 
 # 默认目标
-all: basic adapters factory benchmark configuration
+all: basic adapters factory benchmark configuration enhanced context compatibility
 
 # 运行基础示例
 basic:
@@ -35,10 +35,28 @@ configuration:
 	@cd configuration && go run main.go
 	@echo ""
 
+# 运行增强接口功能示例
+enhanced:
+	@echo "=== 运行增强接口功能示例 ==="
+	@cd enhanced && go run main.go
+	@echo ""
+
+# 运行上下文感知日志示例
+context:
+	@echo "=== 运行上下文感知日志示例 ==="
+	@cd context && go run main.go
+	@echo ""
+
+# 运行多框架兼容性示例
+compatibility:
+	@echo "=== 运行多框架兼容性示例 ==="
+	@cd compatibility && go run main.go
+	@echo ""
+
 # 检查所有示例的语法
 check:
 	@echo "=== 检查示例语法 ==="
-	@for dir in basic adapters factory benchmark configuration; do \
+	@for dir in basic adapters factory benchmark configuration enhanced context compatibility; do \
 		echo "检查 $$dir..."; \
 		cd $$dir && go build -o /dev/null . || exit 1; \
 		cd ..; \
@@ -63,6 +81,14 @@ help:
 	@echo "  factory       - 运行工厂模式示例"
 	@echo "  benchmark     - 运行性能基准测试示例"
 	@echo "  configuration - 运行配置使用示例"
+	@echo "  enhanced      - 运行增强接口功能示例（新）"
+	@echo "  context       - 运行上下文感知日志示例（新）"
+	@echo "  compatibility - 运行多框架兼容性示例（新）"
 	@echo "  check         - 检查所有示例的语法"
 	@echo "  clean         - 清理构建文件"
 	@echo "  help          - 显示此帮助信息"
+	@echo ""
+	@echo "新增功能示例:"
+	@echo "  enhanced      - 演示纯文本日志、键值对日志、原始日志方法等新功能"
+	@echo "  context       - 演示微服务上下文追踪、分布式日志关联等功能"
+	@echo "  compatibility - 演示与Zap、Logrus、slog、Zerolog等框架的兼容性"

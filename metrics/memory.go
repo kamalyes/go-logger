@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-07 23:46:32
+ * @LastEditTime: 2025-11-09 13:22:51
  * @FilePath: \go-logger\metrics\memory.go
  * @Description: 内存监控和管理模块
  *
@@ -216,25 +216,6 @@ type DefaultMemoryMonitor struct {
 	mu sync.RWMutex
 }
 
-// NewDefaultMemoryMonitor 创建默认内存监控器
-func NewDefaultMemoryMonitor() *DefaultMemoryMonitor {
-	return &DefaultMemoryMonitor{
-		sampleInterval:       time.Second * 5, // 5秒采样
-		threshold:           80.0,              // 80%阈值
-		maxMemory:           0,                 // 无限制
-		enableGCTuning:      true,
-		gcPercent:           100,               // 默认GC百分比
-		memoryHistory:       make([]MemoryInfo, 0),
-		gcHistory:          make([]GCInfo, 0),
-		heapHistory:        make([]HeapInfo, 0),
-		maxHistorySize:     100,                // 保存100个历史记录
-		snapshots:          make([]*HeapSnapshot, 0),
-		maxSnapshots:       10,                 // 保存10个快照
-		leakDetectionEnabled: true,
-		stopChan:           make(chan struct{}),
-	}
-}
-
 // Start 开始监控
 func (mm *DefaultMemoryMonitor) Start() error {
 	mm.mu.Lock()
@@ -273,7 +254,11 @@ func (mm *DefaultMemoryMonitor) Stop() error {
 	}
 	
 	mm.running = false
-	close(mm.stopChan)
+
+	if mm.stopChan != nil {
+    	close(mm.stopChan)
+    	mm.stopChan = nil
+	}
 	
 	return nil
 }

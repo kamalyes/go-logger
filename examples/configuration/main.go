@@ -186,6 +186,10 @@ func main() {
 	clonedLogger.Info("普通信息 (不会显示)")
 	clonedLogger.Warn("警告信息")
 
+	// 8. 演示不同场景的用法
+	fmt.Println("\n=== 不同场景配置演示 ===")
+	demonstrateUsageScenarios()
+
 	fmt.Println("\n配置示例完成")
 }
 

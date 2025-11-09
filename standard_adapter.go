@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-07 23:11:53
+ * @LastEditTime: 2025-11-09 16:30:00
  * @FilePath: \go-logger\standard_adapter.go
  * @Description: 标准库日志适配器实现
  *
@@ -11,6 +11,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 // StandardLoggerAdapter 标准库适配器实现
 type StandardLoggerAdapter struct {
-	logger   *Logger
+	logger   ILogger
 	config   *AdapterConfig
 	name     string
 	version  string
@@ -240,5 +241,159 @@ func (s *StandardLoggerAdapter) Clone() ILogger {
 		version:  s.version,
 		healthy:  s.healthy,
 		initTime: s.initTime,
+	}
+}
+
+// 为 StandardLoggerAdapter 添加新接口方法的实现
+
+// 纯文本日志方法
+func (s *StandardLoggerAdapter) DebugMsg(msg string) {
+	if s.healthy {
+		s.logger.DebugMsg(msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) InfoMsg(msg string) {
+	if s.healthy {
+		s.logger.InfoMsg(msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnMsg(msg string) {
+	if s.healthy {
+		s.logger.WarnMsg(msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorMsg(msg string) {
+	if s.healthy {
+		s.logger.ErrorMsg(msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) FatalMsg(msg string) {
+	if s.healthy {
+		s.logger.FatalMsg(msg)
+	}
+}
+
+// 带上下文的日志方法
+func (s *StandardLoggerAdapter) DebugContext(ctx context.Context, format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.DebugContext(ctx, format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) InfoContext(ctx context.Context, format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.InfoContext(ctx, format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnContext(ctx context.Context, format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.WarnContext(ctx, format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorContext(ctx context.Context, format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.ErrorContext(ctx, format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) FatalContext(ctx context.Context, format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.FatalContext(ctx, format, args...)
+	}
+}
+
+// 结构化日志方法（键值对）
+func (s *StandardLoggerAdapter) DebugKV(msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.DebugKV(msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) InfoKV(msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.InfoKV(msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnKV(msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.WarnKV(msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorKV(msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.ErrorKV(msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) FatalKV(msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.FatalKV(msg, keysAndValues...)
+	}
+}
+
+// 原始日志条目方法
+func (s *StandardLoggerAdapter) Log(level LogLevel, msg string) {
+	if s.healthy {
+		s.logger.Log(level, msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) LogContext(ctx context.Context, level LogLevel, msg string) {
+	if s.healthy {
+		s.logger.LogContext(ctx, level, msg)
+	}
+}
+
+func (s *StandardLoggerAdapter) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.LogKV(level, msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.LogWithFields(level, msg, fields)
+	}
+}
+
+// WithContext 的实现
+func (s *StandardLoggerAdapter) WithContext(ctx context.Context) ILogger {
+	if s.healthy {
+		return &StandardLoggerAdapter{
+			logger:   s.logger.WithContext(ctx),
+			config:   s.config,
+			name:     s.name,
+			version:  s.version,
+			healthy:  s.healthy,
+			initTime: s.initTime,
+		}
+	}
+	return s
+}
+
+// 兼容标准log包的方法
+func (s *StandardLoggerAdapter) Print(args ...interface{}) {
+	if s.healthy {
+		s.logger.Print(args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Printf(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Printf(format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Println(args ...interface{}) {
+	if s.healthy {
+		s.logger.Println(args...)
 	}
 }

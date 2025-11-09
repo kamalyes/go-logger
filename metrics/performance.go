@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-07 00:00:00
+ * @LastEditTime: 2025-11-09 13:21:52
  * @FilePath: \go-logger\metrics\performance.go
  * @Description: 性能监控模块 - 监控日志系统性能
  *

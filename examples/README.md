@@ -11,6 +11,9 @@ examples/
 ├── factory/        # 工厂模式示例
 ├── benchmark/      # 性能基准测试示例
 ├── configuration/  # 配置使用示例
+├── enhanced/       # 增强接口功能演示（新增）
+├── context/        # 上下文感知日志演示（新增）
+├── compatibility/  # 多框架兼容性演示（新增）
 └── README.md       # 本文件
 ```
 
@@ -97,6 +100,56 @@ go run main.go
 - 彩色输出配置
 - 配置验证和克隆
 
+### 6. 增强接口功能 (enhanced/)
+
+演示新增的增强接口功能：
+
+```bash
+cd enhanced
+go run main.go
+```
+
+**特性演示：**
+- 纯文本消息日志（DebugMsg, InfoMsg 等）
+- 上下文感知日志（WithContext, DebugContext 等）
+- 结构化键值对日志（InfoKV, ErrorKV 等）
+- 原始日志条目方法（Log, LogKV, LogWithFields）
+- 多框架兼容性（Zap, Logrus, slog 风格）
+- 标准库兼容性（Print, Printf, Println）
+
+### 7. 上下文感知日志 (context/)
+
+演示微服务中的上下文日志追踪：
+
+```bash
+cd context
+go run main.go
+```
+
+**特性演示：**
+- 分布式追踪上下文传递
+- 微服务间日志关联
+- HTTP请求生命周期跟踪
+- 错误传播和追踪
+- 后台任务上下文管理
+
+### 8. 多框架兼容性 (compatibility/)
+
+演示与主流日志框架的兼容性：
+
+```bash
+cd compatibility
+go run main.go
+```
+
+**特性演示：**
+- Zap 风格的键值对日志
+- Logrus 风格的字段日志
+- slog 风格的上下文日志
+- Zerolog 风格的事件日志
+- 标准库 log 的兼容性
+- 混合使用多种风格
+
 ## 核心概念
 
 ### 日志级别
@@ -120,6 +173,61 @@ log.Debug("调试信息")
 log.Info("普通信息") 
 log.Warn("警告信息")
 log.Error("错误信息")
+```
+
+### 增强功能（新）
+
+#### 纯文本消息日志
+```go
+log.InfoMsg("纯文本信息")
+log.ErrorMsg("纯文本错误")
+```
+
+#### 上下文感知日志
+```go
+ctx := context.Background()
+log.InfoContext(ctx, "处理请求: %s", "login")
+log.ErrorContext(ctx, "处理失败: %v", err)
+
+// 创建带上下文的日志器
+ctxLogger := log.WithContext(ctx)
+ctxLogger.Info("携带上下文的日志")
+```
+
+#### 结构化键值对日志（类似Zap）
+```go
+log.InfoKV("用户登录",
+    "user_id", 12345,
+    "username", "john_doe",
+    "ip_address", "192.168.1.100",
+)
+```
+
+#### 原始日志条目方法
+```go
+log.Log(logger.INFO, "原始信息日志")
+log.LogKV(logger.ERROR, "错误日志", "error_code", "E001")
+log.LogWithFields(logger.DEBUG, "调试信息", map[string]interface{}{
+    "component": "auth",
+    "action": "validate",
+})
+```
+
+#### 多框架兼容性
+```go
+// Zap 风格
+log.InfoKV("消息", "key1", "value1", "key2", "value2")
+
+// Logrus 风格  
+log.WithField("component", "auth").Info("消息")
+log.WithFields(map[string]interface{}{"k1": "v1"}).Info("消息")
+
+// slog 风格
+log.InfoContext(ctx, "处理请求: %s", "data")
+
+// 标准库 log 风格
+log.Printf("格式化消息: %s", "data")
+log.Println("简单消息")
 ```
 
 ### 结构化日志
@@ -160,23 +268,78 @@ log := logger.NewLogger(config)
 
 ## 最佳实践
 
-1. **选择合适的日志级别**
+### 1. 选择合适的日志级别和方法
    - 生产环境使用 INFO 或更高级别
    - 开发环境可以使用 DEBUG 级别
+   - 根据场景选择最合适的日志方法：
+     * 简单消息：使用 `InfoMsg()`, `ErrorMsg()` 等
+     * 格式化消息：使用 `Info()`, `Error()` 等
+     * 结构化数据：使用 `InfoKV()`, `ErrorKV()` 等
+     * 上下文追踪：使用 `InfoContext()`, `ErrorContext()` 等
 
-2. **使用结构化日志**
-   - 便于日志分析和搜索
-   - 提供更多上下文信息
+### 2. 上下文感知日志使用
+   - 在HTTP服务中传递请求上下文
+   - 使用 `WithContext()` 创建携带上下文的日志器
+   - 在微服务间传递追踪信息
+   ```go
+   // 推荐模式
+   func handleRequest(ctx context.Context, log logger.ILogger) {
+       reqLogger := log.WithContext(ctx)
+       reqLogger.Info("开始处理请求")
+       // ... 处理逻辑
+       reqLogger.Info("请求处理完成")
+   }
+   ```
 
-3. **合理使用调用者信息**
+### 3. 结构化日志使用
+   - 优先使用键值对日志而非字符串拼接
+   - 保持字段名称的一致性
+   - 使用有意义的字段名
+   ```go
+   // 推荐
+   log.InfoKV("用户操作",
+       "user_id", 12345,
+       "action", "login",
+       "ip", "192.168.1.100",
+   )
+   
+   // 不推荐
+   log.Info("用户 %d 从 %s 登录", 12345, "192.168.1.100")
+   ```
+
+### 4. 错误处理最佳实践
+   ```go
+   // 使用 WithError 记录错误
+   if err != nil {
+       log.WithError(err).Error("操作失败")
+       return err
+   }
+   
+   // 或使用键值对格式
+   if err != nil {
+       log.ErrorKV("数据库操作失败",
+           "operation", "INSERT",
+           "table", "users",
+           "error", err.Error(),
+       )
+       return err
+   }
+   ```
+
+### 5. 多框架兼容性使用
+   - 在迁移项目时可以保持原有的日志调用风格
+   - 混合使用不同风格以适应不同场景
+   - 团队内保持风格一致性
+
+### 6. 合理使用调用者信息
    - 开发时开启，便于调试
    - 生产环境关闭，提高性能
 
-4. **配置验证**
+### 7. 配置验证
    - 在应用启动时验证日志配置
    - 确保配置的正确性
 
-5. **资源管理**
+### 8. 资源管理
    - 适当时机刷新和关闭日志器
    - 避免内存泄漏
 

@@ -2,24 +2,54 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-07 00:00:00
+ * @LastEditTime: 2025-11-09 16:00:00
  * @FilePath: \go-logger\interfaces.go
- * @Description: 日志接口定义
+ * @Description: 日志接口定义 - 增强版本，支持多种日志框架的参数格式
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 package logger
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
-// ILogger 日志记录器接口
+// ILogger 增强的日志记录器接口，支持多种参数格式
 type ILogger interface {
-	// 基本日志方法
+	// 基本日志方法（Printf风格）
 	Debug(format string, args ...interface{})
 	Info(format string, args ...interface{})
 	Warn(format string, args ...interface{})
 	Error(format string, args ...interface{})
 	Fatal(format string, args ...interface{})
+	
+	// 纯文本日志方法（支持单个消息）
+	DebugMsg(msg string)
+	InfoMsg(msg string)
+	WarnMsg(msg string)
+	ErrorMsg(msg string)
+	FatalMsg(msg string)
+	
+	// 带上下文的日志方法
+	DebugContext(ctx context.Context, format string, args ...interface{})
+	InfoContext(ctx context.Context, format string, args ...interface{})
+	WarnContext(ctx context.Context, format string, args ...interface{})
+	ErrorContext(ctx context.Context, format string, args ...interface{})
+	FatalContext(ctx context.Context, format string, args ...interface{})
+	
+	// 结构化日志方法（键值对）
+	DebugKV(msg string, keysAndValues ...interface{})
+	InfoKV(msg string, keysAndValues ...interface{})
+	WarnKV(msg string, keysAndValues ...interface{})
+	ErrorKV(msg string, keysAndValues ...interface{})
+	FatalKV(msg string, keysAndValues ...interface{})
+	
+	// 原始日志条目方法（最灵活）
+	Log(level LogLevel, msg string)
+	LogContext(ctx context.Context, level LogLevel, msg string)
+	LogKV(level LogLevel, msg string, keysAndValues ...interface{})
+	LogWithFields(level LogLevel, msg string, fields map[string]interface{})
 	
 	// 配置方法
 	SetLevel(level LogLevel)
@@ -28,13 +58,17 @@ type ILogger interface {
 	IsShowCaller() bool
 	IsLevelEnabled(level LogLevel) bool
 	
-	// 结构化日志
+	// 结构化日志构建器
 	WithField(key string, value interface{}) ILogger
 	WithFields(fields map[string]interface{}) ILogger
 	WithError(err error) ILogger
+	WithContext(ctx context.Context) ILogger
 	
 	// 实用方法
 	Clone() ILogger
+	Print(args ...interface{})     // 兼容标准log包
+	Printf(format string, args ...interface{}) // 兼容标准log包
+	Println(args ...interface{})   // 兼容标准log包
 }
 
 // IAdapter 日志适配器接口
@@ -135,4 +169,99 @@ type IMiddleware interface {
 	Process(entry *LogEntry, next func(*LogEntry) error) error
 	GetName() string
 	GetPriority() int
+}
+
+// 框架兼容性接口
+
+// IZapLogger Zap日志框架兼容接口
+type IZapLogger interface {
+	// Zap特有方法
+	DPanic(msg string, fields ...interface{})
+	Sync() error
+	Sugar() ILogger
+}
+
+// ILogrusLogger Logrus日志框架兼容接口
+type ILogrusLogger interface {
+	// Logrus特有方法
+	Trace(args ...interface{})
+}
+
+// ISlogLogger 标准库slog兼容接口
+type ISlogLogger interface {
+	// slog特有方法
+	LogAttrs(ctx context.Context, level LogLevel, msg string, attrs ...interface{})
+	With(args ...interface{}) ISlogLogger
+	WithGroup(name string) ISlogLogger
+}
+
+// IZerologLogger Zerolog兼容接口
+type IZerologLogger interface {
+	// Zerolog链式方法
+	Str(key, val string) IZerologLogger
+	Int(key string, i int) IZerologLogger
+	Float64(key string, f float64) IZerologLogger
+	Bool(key string, b bool) IZerologLogger
+	Time(key string, t interface{}) IZerologLogger
+	Dur(key string, d interface{}) IZerologLogger
+	Msg(msg string)
+	Msgf(format string, v ...interface{})
+}
+
+// 通用日志适配器接口
+type IFrameworkAdapter interface {
+	ILogger
+	
+	// 框架检测
+	GetFrameworkName() string
+	GetFrameworkVersion() string
+	
+	// 原生框架实例
+	GetNativeLogger() interface{}
+	
+	// 配置同步
+	SyncConfig() error
+}
+
+// 日志参数辅助类型
+type LogArgs struct {
+	Format string
+	Args   []interface{}
+	Fields map[string]interface{}
+	Context context.Context
+}
+
+// 构建器模式接口
+type ILogBuilder interface {
+	Level(level LogLevel) ILogBuilder
+	Message(msg string) ILogBuilder
+	Field(key string, value interface{}) ILogBuilder
+	Fields(fields map[string]interface{}) ILogBuilder
+	Error(err error) ILogBuilder
+	Context(ctx context.Context) ILogBuilder
+	Caller(skip int) ILogBuilder
+	Timestamp(t interface{}) ILogBuilder
+	Build() *LogEntry
+	Log()
+}
+
+// 高级日志功能接口
+type IAdvancedLogger interface {
+	ILogger
+	
+	// 采样和限流
+	Sample(every int) ILogger
+	RateLimit(rate float64) ILogger
+	
+	// 异步日志
+	Async() ILogger
+	Sync() error
+	
+	// 缓冲控制
+	Buffer(size int) ILogger
+	Flush() error
+	
+	// 条件日志
+	If(condition bool) ILogger
+	Unless(condition bool) ILogger
 }

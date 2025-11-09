@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-08 01:23:45
+ * @LastEditTime: 2025-11-09 13:19:36
  * @FilePath: \go-logger\metrics\memory_test.go
  * @Description: 内存监控模块测试套件
  *
@@ -53,28 +53,6 @@ func (suite *MemoryMonitorTestSuite) TearDownTest() {
 	}
 	suite.monitor = nil
 	runtime.GC() // 清理测试产生的垃圾
-}
-
-// TestNewDefaultMemoryMonitor 测试构造函数
-func (suite *MemoryMonitorTestSuite) TestNewDefaultMemoryMonitor() {
-	// 重新创建一个新实例来测试构造函数
-	monitor := NewDefaultMemoryMonitor()
-	
-	suite.NotNil(monitor)
-	suite.Equal(time.Second*5, monitor.sampleInterval)
-	suite.Equal(80.0, monitor.threshold)
-	suite.Equal(uint64(0), monitor.maxMemory)
-	suite.True(monitor.enableGCTuning)
-	suite.Equal(100, monitor.gcPercent)
-	suite.Equal(100, monitor.maxHistorySize)
-	suite.Equal(10, monitor.maxSnapshots)
-	suite.True(monitor.leakDetectionEnabled)
-	suite.False(monitor.running)
-	suite.NotNil(monitor.stopChan)
-	suite.NotNil(monitor.memoryHistory)
-	suite.NotNil(monitor.gcHistory)
-	suite.NotNil(monitor.heapHistory)
-	suite.NotNil(monitor.snapshots)
 }
 
 // TestStartStop 测试启动和停止功能
