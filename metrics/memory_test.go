@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 13:19:36
+ * @LastEditTime: 2025-11-09 13:27:49
  * @FilePath: \go-logger\metrics\memory_test.go
  * @Description: 内存监控模块测试套件
  *
@@ -583,10 +583,10 @@ func (suite *MemoryMonitorTestSuite) TestEmergencyOptimization() {
 	
 	// 验证数据被清理
 	suite.monitor.mu.Lock()
-	suite.True(len(suite.monitor.memoryHistory) <= 20)
-	suite.True(len(suite.monitor.gcHistory) <= 20)
-	suite.True(len(suite.monitor.heapHistory) <= 20)
-	suite.True(len(suite.monitor.snapshots) <= 5)
+	suite.LessOrEqual(len(suite.monitor.memoryHistory), 20)
+	suite.LessOrEqual(len(suite.monitor.gcHistory), 20)
+	suite.LessOrEqual(len(suite.monitor.heapHistory), 20)
+	suite.LessOrEqual(len(suite.monitor.snapshots), 5)
 	suite.monitor.mu.Unlock()
 }
 
