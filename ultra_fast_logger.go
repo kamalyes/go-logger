@@ -42,13 +42,13 @@ var (
 	warnPrefix  = []byte("⚠️ [WARN] ")
 	errorPrefix = []byte("❌ [ERROR] ")
 	fatalPrefix = []byte("💀 [FATAL] ")
-	
+
 	debugPrefixColor = []byte("\033[36m🐛 [DEBUG]\033[0m ")
 	infoPrefixColor  = []byte("\033[32mℹ️ [INFO]\033[0m ")
 	warnPrefixColor  = []byte("\033[33m⚠️ [WARN]\033[0m ")
 	errorPrefixColor = []byte("\033[31m❌ [ERROR]\033[0m ")
 	fatalPrefixColor = []byte("\033[35m💀 [FATAL]\033[0m ")
-	
+
 	newline = []byte("\n")
 	space   = []byte(" ")
 )
@@ -76,7 +76,7 @@ type UltraFastLogger struct {
 	colorful bool
 	output   io.Writer
 	mu       sync.Mutex // 保护并发写入
-	
+
 	// 优化选项
 	skipTimestamp bool // 跳过时间戳以获得极致性能
 	skipCaller    bool // 跳过调用者信息
@@ -126,7 +126,7 @@ func fastAppendInt(buf []byte, val int) []byte {
 	if val == 0 {
 		return append(buf, '0')
 	}
-	
+
 	// 快速路径：小数字
 	if val < 10 {
 		return append(buf, byte('0'+val))
@@ -137,7 +137,7 @@ func fastAppendInt(buf []byte, val int) []byte {
 	if val < 1000 {
 		return append(buf, byte('0'+val/100), byte('0'+(val/10)%10), byte('0'+val%10))
 	}
-	
+
 	// 通用路径
 	return strconv.AppendInt(buf, int64(val), 10)
 }
@@ -146,7 +146,7 @@ func fastAppendInt(buf []byte, val int) []byte {
 func fastFormatTime(buf []byte, t time.Time) []byte {
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
-	
+
 	// 手动格式化 "2006/01/02 15:04:05 "
 	buf = fastAppendInt(buf, year)
 	buf = append(buf, '/')
@@ -166,7 +166,7 @@ func fastFormatTime(buf []byte, t time.Time) []byte {
 	}
 	buf = fastAppendInt(buf, sec)
 	buf = append(buf, ' ')
-	
+
 	return buf
 }
 
@@ -180,7 +180,7 @@ func (l *UltraFastLogger) ultraLog(level LogLevel, msg string) {
 	// 获取字节缓冲区
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0] // 重置长度但保留容量
-	
+
 	defer bytePool.Put(buf)
 
 	// 添加时间戳（如果需要）
@@ -249,6 +249,27 @@ func (l *UltraFastLogger) Fatal(format string, args ...interface{}) {
 	l.ultraLogf(FATAL, format, args...)
 }
 
+// Printf风格方法（与上面相同，但命名更明确）
+func (l *UltraFastLogger) Debugf(format string, args ...interface{}) {
+	l.ultraLogf(DEBUG, format, args...)
+}
+
+func (l *UltraFastLogger) Infof(format string, args ...interface{}) {
+	l.ultraLogf(INFO, format, args...)
+}
+
+func (l *UltraFastLogger) Warnf(format string, args ...interface{}) {
+	l.ultraLogf(WARN, format, args...)
+}
+
+func (l *UltraFastLogger) Errorf(format string, args ...interface{}) {
+	l.ultraLogf(ERROR, format, args...)
+}
+
+func (l *UltraFastLogger) Fatalf(format string, args ...interface{}) {
+	l.ultraLogf(FATAL, format, args...)
+}
+
 // 纯文本日志方法
 func (l *UltraFastLogger) DebugMsg(msg string) {
 	l.ultraLog(DEBUG, msg)
@@ -304,13 +325,13 @@ func (l *UltraFastLogger) LogWithFields(level LogLevel, msg string, fields map[s
 	if level < l.level {
 		return
 	}
-	
+
 	// 快速构建字段消息
 	if len(fields) == 0 {
 		l.ultraLog(level, msg)
 		return
 	}
-	
+
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
 	defer bytePool.Put(buf)
@@ -329,7 +350,7 @@ func (l *UltraFastLogger) LogWithFields(level LogLevel, msg string, fields map[s
 		buf = append(buf, unsafeStringToBytes(val)...)
 		first = false
 	}
-	
+
 	buf = append(buf, '}')
 	l.ultraLog(level, unsafeBytesToString(buf))
 }
@@ -435,21 +456,21 @@ func (l *UltraFastLogger) logWithKV(level LogLevel, msg string, keysAndValues ..
 		if i > 0 {
 			buf = append(buf, ", "...)
 		}
-		
+
 		// 键
 		key := fmt.Sprint(keysAndValues[i])
 		buf = append(buf, unsafeStringToBytes(key)...)
 		buf = append(buf, ": "...)
-		
+
 		// 值
 		if i+1 < len(keysAndValues) {
 			val := fmt.Sprint(keysAndValues[i+1])
 			buf = append(buf, unsafeStringToBytes(val)...)
 		}
 	}
-	
+
 	buf = append(buf, '}')
-	
+
 	l.ultraLog(level, unsafeBytesToString(buf))
 }
 
@@ -508,9 +529,30 @@ func (f *ultraFieldLogger) Fatal(format string, args ...interface{}) {
 	f.logWithFields(FATAL, format, args...)
 }
 
+// Printf风格方法（与上面相同，但命名更明确）
+func (f *ultraFieldLogger) Debugf(format string, args ...interface{}) {
+	f.logWithFields(DEBUG, format, args...)
+}
+
+func (f *ultraFieldLogger) Infof(format string, args ...interface{}) {
+	f.logWithFields(INFO, format, args...)
+}
+
+func (f *ultraFieldLogger) Warnf(format string, args ...interface{}) {
+	f.logWithFields(WARN, format, args...)
+}
+
+func (f *ultraFieldLogger) Errorf(format string, args ...interface{}) {
+	f.logWithFields(ERROR, format, args...)
+}
+
+func (f *ultraFieldLogger) Fatalf(format string, args ...interface{}) {
+	f.logWithFields(FATAL, format, args...)
+}
+
 func (f *ultraFieldLogger) logWithFields(level LogLevel, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	
+
 	// 快速构建字段字符串
 	if f.key != "" {
 		msg = fmt.Sprintf("%s {%s: %v}", msg, f.key, f.value)
@@ -637,14 +679,14 @@ func (f *ultraFieldLogger) LogWithFields(level LogLevel, msg string, fields map[
 	for k, v := range fields {
 		allFields[k] = v
 	}
-	
+
 	f.logger.LogWithFields(level, msg, allFields)
 }
 
 // 委托其他方法
-func (f *ultraFieldLogger) Print(v ...interface{}) { f.logger.Print(v...) }
+func (f *ultraFieldLogger) Print(v ...interface{})                 { f.logger.Print(v...) }
 func (f *ultraFieldLogger) Printf(format string, v ...interface{}) { f.logger.Printf(format, v...) }
-func (f *ultraFieldLogger) Println(v ...interface{}) { f.logger.Println(v...) }
+func (f *ultraFieldLogger) Println(v ...interface{})               { f.logger.Println(v...) }
 
 func (f *ultraFieldLogger) DebugContext(ctx context.Context, format string, args ...interface{}) {
 	f.logger.DebugContext(ctx, format, args...)
@@ -662,12 +704,24 @@ func (f *ultraFieldLogger) FatalContext(ctx context.Context, format string, args
 	f.logger.FatalContext(ctx, format, args...)
 }
 
-func (f *ultraFieldLogger) DebugKV(msg string, keysAndValues ...interface{}) { f.logger.DebugKV(msg, keysAndValues...) }
-func (f *ultraFieldLogger) InfoKV(msg string, keysAndValues ...interface{}) { f.logger.InfoKV(msg, keysAndValues...) }
-func (f *ultraFieldLogger) WarnKV(msg string, keysAndValues ...interface{}) { f.logger.WarnKV(msg, keysAndValues...) }
-func (f *ultraFieldLogger) ErrorKV(msg string, keysAndValues ...interface{}) { f.logger.ErrorKV(msg, keysAndValues...) }
-func (f *ultraFieldLogger) FatalKV(msg string, keysAndValues ...interface{}) { f.logger.FatalKV(msg, keysAndValues...) }
-func (f *ultraFieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) { f.logger.LogKV(level, msg, keysAndValues...) }
+func (f *ultraFieldLogger) DebugKV(msg string, keysAndValues ...interface{}) {
+	f.logger.DebugKV(msg, keysAndValues...)
+}
+func (f *ultraFieldLogger) InfoKV(msg string, keysAndValues ...interface{}) {
+	f.logger.InfoKV(msg, keysAndValues...)
+}
+func (f *ultraFieldLogger) WarnKV(msg string, keysAndValues ...interface{}) {
+	f.logger.WarnKV(msg, keysAndValues...)
+}
+func (f *ultraFieldLogger) ErrorKV(msg string, keysAndValues ...interface{}) {
+	f.logger.ErrorKV(msg, keysAndValues...)
+}
+func (f *ultraFieldLogger) FatalKV(msg string, keysAndValues ...interface{}) {
+	f.logger.FatalKV(msg, keysAndValues...)
+}
+func (f *ultraFieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
+	f.logger.LogKV(level, msg, keysAndValues...)
+}
 
 func (f *ultraFieldLogger) WithField(key string, value interface{}) ILogger {
 	newFields := make(map[string]interface{})

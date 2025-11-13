@@ -31,16 +31,16 @@ var stringBuilderPool = sync.Pool{
 var (
 	levelFormatsCache      = make(map[LogLevel]string)
 	colorLevelFormatsCache = make(map[LogLevel]string)
-	initCacheOnce         sync.Once
+	initCacheOnce          sync.Once
 )
 
 func initLevelFormatsCache() {
 	levels := []LogLevel{DEBUG, INFO, WARN, ERROR, FATAL}
-	
+
 	for _, level := range levels {
 		// 普通格式
 		levelFormatsCache[level] = fmt.Sprintf("%s [%s]", level.Emoji(), level.String())
-		
+
 		// 彩色格式
 		colorLevelFormatsCache[level] = level.Color() + levelFormatsCache[level] + "\033[0m"
 	}
@@ -112,11 +112,11 @@ func (l *Logger) UpdateConfig(config *LogConfig) {
 	if config == nil {
 		return
 	}
-	
+
 	l.config = config.Clone()
 	l.level = config.Level
 	l.showCaller = config.ShowCaller
-	
+
 	// 更新内部logger
 	prefix := config.Prefix
 	if prefix != "" && !strings.HasSuffix(prefix, " ") {
@@ -129,33 +129,33 @@ func (l *Logger) UpdateConfig(config *LogConfig) {
 func (l *Logger) formatMessage(level LogLevel, format string, args ...interface{}) string {
 	// 初始化缓存
 	initCacheOnce.Do(initLevelFormatsCache)
-	
+
 	// 提前检查级别，避免不必要的计算
 	if level < l.level {
 		return ""
 	}
-	
+
 	// 使用 strings.Builder 减少内存分配
 	sb := stringBuilderPool.Get().(*strings.Builder)
 	defer func() {
 		sb.Reset()
 		stringBuilderPool.Put(sb)
 	}()
-	
+
 	// 预估容量
 	estimatedSize := len(format) + 100
 	if l.showCaller {
 		estimatedSize += 50
 	}
 	sb.Grow(estimatedSize)
-	
+
 	// 使用预计算的级别格式
 	if l.config.Colorful {
 		sb.WriteString(colorLevelFormatsCache[level])
 	} else {
 		sb.WriteString(levelFormatsCache[level])
 	}
-	
+
 	// 添加调用者信息（如果需要）
 	if l.showCaller {
 		if pc, file, line, ok := runtime.Caller(3); ok {
@@ -169,7 +169,7 @@ func (l *Logger) formatMessage(level LogLevel, format string, args ...interface{
 			sb.WriteString(fmt.Sprintf(" [%s:%d:%s]", file, line, funcName))
 		}
 	}
-	
+
 	// 添加消息
 	sb.WriteByte(' ')
 	if len(args) == 0 {
@@ -178,7 +178,7 @@ func (l *Logger) formatMessage(level LogLevel, format string, args ...interface{
 		// 只在需要时格式化
 		sb.WriteString(fmt.Sprintf(format, args...))
 	}
-	
+
 	return sb.String()
 }
 
@@ -224,12 +224,33 @@ func (l *Logger) Fatal(format string, args ...interface{}) {
 	l.log(FATAL, format, args...)
 }
 
+// Printf风格方法（与上面相同，但命名更明确）
+func (l *Logger) Debugf(format string, args ...interface{}) {
+	l.log(DEBUG, format, args...)
+}
+
+func (l *Logger) Infof(format string, args ...interface{}) {
+	l.log(INFO, format, args...)
+}
+
+func (l *Logger) Warnf(format string, args ...interface{}) {
+	l.log(WARN, format, args...)
+}
+
+func (l *Logger) Errorf(format string, args ...interface{}) {
+	l.log(ERROR, format, args...)
+}
+
+func (l *Logger) Fatalf(format string, args ...interface{}) {
+	l.log(FATAL, format, args...)
+}
+
 // WithField 添加字段信息（结构化日志）
 func (l *Logger) WithField(key string, value interface{}) ILogger {
 	prefix := fmt.Sprintf("%s%s=%v ", l.config.Prefix, key, value)
 	config := l.config.Clone()
 	config.Prefix = prefix
-	
+
 	return NewLogger(config)
 }
 
@@ -238,17 +259,17 @@ func (l *Logger) WithFields(fields map[string]interface{}) ILogger {
 	if len(fields) == 0 {
 		return l
 	}
-	
+
 	var prefix strings.Builder
 	prefix.WriteString(l.config.Prefix)
-	
+
 	for key, value := range fields {
 		prefix.WriteString(fmt.Sprintf("%s=%v ", key, value))
 	}
-	
+
 	config := l.config.Clone()
 	config.Prefix = prefix.String()
-	
+
 	return NewLogger(config)
 }
 
@@ -450,7 +471,7 @@ func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...interface{})
 	if len(fields) > 0 {
 		logger = logger.WithFields(fields).(*Logger) // 这里需要类型转换，因为我们知道返回的是 *Logger
 	}
-	
+
 	switch level {
 	case DEBUG:
 		logger.Debug("%s", msg)
@@ -470,7 +491,7 @@ func (l *Logger) LogWithFields(level LogLevel, msg string, fields map[string]int
 	if len(fields) > 0 {
 		logger = logger.WithFields(fields).(*Logger) // 类型转换
 	}
-	
+
 	switch level {
 	case DEBUG:
 		logger.Debug("%s", msg)
@@ -514,10 +535,10 @@ func (l *Logger) parseKeysAndValues(keysAndValues ...interface{}) map[string]int
 	if len(keysAndValues) == 0 {
 		return nil
 	}
-	
+
 	// 预分配合适大小的map
 	fields := make(map[string]interface{}, len(keysAndValues)/2+1)
-	
+
 	for i := 0; i < len(keysAndValues); i += 2 {
 		if i+1 < len(keysAndValues) {
 			// 优化字符串转换

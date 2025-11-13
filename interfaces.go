@@ -23,85 +23,92 @@ type ILogger interface {
 	Warn(format string, args ...interface{})
 	Error(format string, args ...interface{})
 	Fatal(format string, args ...interface{})
-	
+
+	// Printf风格日志方法（与上面相同，但命名更明确）
+	Debugf(format string, args ...interface{})
+	Infof(format string, args ...interface{})
+	Warnf(format string, args ...interface{})
+	Errorf(format string, args ...interface{})
+	Fatalf(format string, args ...interface{})
+
 	// 纯文本日志方法（支持单个消息）
 	DebugMsg(msg string)
 	InfoMsg(msg string)
 	WarnMsg(msg string)
 	ErrorMsg(msg string)
 	FatalMsg(msg string)
-	
+
 	// 带上下文的日志方法
 	DebugContext(ctx context.Context, format string, args ...interface{})
 	InfoContext(ctx context.Context, format string, args ...interface{})
 	WarnContext(ctx context.Context, format string, args ...interface{})
 	ErrorContext(ctx context.Context, format string, args ...interface{})
 	FatalContext(ctx context.Context, format string, args ...interface{})
-	
+
 	// 结构化日志方法（键值对）
 	DebugKV(msg string, keysAndValues ...interface{})
 	InfoKV(msg string, keysAndValues ...interface{})
 	WarnKV(msg string, keysAndValues ...interface{})
 	ErrorKV(msg string, keysAndValues ...interface{})
 	FatalKV(msg string, keysAndValues ...interface{})
-	
+
 	// 原始日志条目方法（最灵活）
 	Log(level LogLevel, msg string)
 	LogContext(ctx context.Context, level LogLevel, msg string)
 	LogKV(level LogLevel, msg string, keysAndValues ...interface{})
 	LogWithFields(level LogLevel, msg string, fields map[string]interface{})
-	
+
 	// 配置方法
 	SetLevel(level LogLevel)
 	GetLevel() LogLevel
 	SetShowCaller(show bool)
 	IsShowCaller() bool
 	IsLevelEnabled(level LogLevel) bool
-	
+
 	// 结构化日志构建器
 	WithField(key string, value interface{}) ILogger
 	WithFields(fields map[string]interface{}) ILogger
 	WithError(err error) ILogger
 	WithContext(ctx context.Context) ILogger
-	
+
 	// 实用方法
 	Clone() ILogger
-	Print(args ...interface{})     // 兼容标准log包
+	Print(args ...interface{})                 // 兼容标准log包
 	Printf(format string, args ...interface{}) // 兼容标准log包
-	Println(args ...interface{})   // 兼容标准log包
+	Println(args ...interface{})               // 兼容标准log包
 }
 
 // IAdapter 日志适配器接口
 type IAdapter interface {
 	ILogger
-	
+
 	// 生命周期管理
 	Initialize() error
 	Close() error
 	Flush() error
-	
+
 	// 适配器特定功能
 	GetAdapterName() string
 	GetAdapterVersion() string
 	IsHealthy() bool
 }
 
-// IManager 日志管理器接口  
+// IManager 日志管理器接口
 type IManager interface {
 	// 适配器管理
 	AddAdapter(name string, adapter IAdapter) error
 	GetAdapter(name string) (IAdapter, bool)
 	RemoveAdapter(name string) error
 	ListAdapters() []string
-	
+
 	// 生命周期管理
 	CloseAll() error
 	FlushAll() error
-	
+
 	// 全局设置
 	SetLevelAll(level LogLevel)
 	Broadcast(level LogLevel, format string, args ...interface{})
-	
+
 	// 健康检查
 	HealthCheck() map[string]bool
 }
@@ -109,12 +116,12 @@ type IManager interface {
 // IFileWriter 文件写入器接口
 type IFileWriter interface {
 	io.WriteCloser
-	
+
 	// 文件管理
 	Rotate() error
 	GetCurrentFile() string
 	GetFileSize() int64
-	
+
 	// 配置
 	SetMaxSize(size int64)
 	SetMaxBackups(backups int)
@@ -153,12 +160,12 @@ type IHook interface {
 // IWriter 日志写入器接口
 type IWriter interface {
 	io.Writer
-	
+
 	// 写入控制
 	WriteLevel(level LogLevel, data []byte) (n int, err error)
 	Flush() error
 	Close() error
-	
+
 	// 状态查询
 	IsHealthy() bool
 	GetStats() interface{}
@@ -211,23 +218,23 @@ type IZerologLogger interface {
 // 通用日志适配器接口
 type IFrameworkAdapter interface {
 	ILogger
-	
+
 	// 框架检测
 	GetFrameworkName() string
 	GetFrameworkVersion() string
-	
+
 	// 原生框架实例
 	GetNativeLogger() interface{}
-	
+
 	// 配置同步
 	SyncConfig() error
 }
 
 // 日志参数辅助类型
 type LogArgs struct {
-	Format string
-	Args   []interface{}
-	Fields map[string]interface{}
+	Format  string
+	Args    []interface{}
+	Fields  map[string]interface{}
 	Context context.Context
 }
 
@@ -248,19 +255,19 @@ type ILogBuilder interface {
 // 高级日志功能接口
 type IAdvancedLogger interface {
 	ILogger
-	
+
 	// 采样和限流
 	Sample(every int) ILogger
 	RateLimit(rate float64) ILogger
-	
+
 	// 异步日志
 	Async() ILogger
 	Sync() error
-	
+
 	// 缓冲控制
 	Buffer(size int) ILogger
 	Flush() error
-	
+
 	// 条件日志
 	If(condition bool) ILogger
 	Unless(condition bool) ILogger

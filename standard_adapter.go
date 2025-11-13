@@ -32,7 +32,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 	if config == nil {
 		config = DefaultAdapterConfig()
 	}
-	
+
 	// 获取前缀
 	prefix := ""
 	if prefixVal, ok := config.Fields["prefix"]; ok {
@@ -40,7 +40,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 			prefix = prefixStr
 		}
 	}
-	
+
 	// 创建Logger配置
 	logConfig := &LogConfig{
 		Level:      config.Level,
@@ -50,7 +50,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 		Colorful:   config.Colorful,
 		TimeFormat: config.TimeFormat,
 	}
-	
+
 	// 添加字段前缀
 	if len(config.Fields) > 0 {
 		var prefixParts []string
@@ -67,7 +67,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 			logConfig.Prefix = existingPrefix + strings.Join(prefixParts, " ") + " "
 		}
 	}
-	
+
 	adapter := &StandardLoggerAdapter{
 		logger:   NewLogger(logConfig),
 		config:   config,
@@ -76,7 +76,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 		healthy:  true,
 		initTime: time.Now(),
 	}
-	
+
 	return adapter, nil
 }
 
@@ -144,6 +144,37 @@ func (s *StandardLoggerAdapter) Error(format string, args ...interface{}) {
 
 // Fatal 致命错误日志
 func (s *StandardLoggerAdapter) Fatal(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Fatal(format, args...)
+	}
+}
+
+// Printf风格方法（与上面相同，但命名更明确）
+func (s *StandardLoggerAdapter) Debugf(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Debug(format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Infof(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Info(format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Warnf(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Warn(format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Errorf(format string, args ...interface{}) {
+	if s.healthy {
+		s.logger.Error(format, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) Fatalf(format string, args ...interface{}) {
 	if s.healthy {
 		s.logger.Fatal(format, args...)
 	}

@@ -46,6 +46,13 @@ func (e *EmptyLogger) Warn(format string, args ...interface{})  {}
 func (e *EmptyLogger) Error(format string, args ...interface{}) {}
 func (e *EmptyLogger) Fatal(format string, args ...interface{}) {}
 
+// Printf风格方法（与上面相同，但命名更明确）
+func (e *EmptyLogger) Debugf(format string, args ...interface{}) {}
+func (e *EmptyLogger) Infof(format string, args ...interface{})  {}
+func (e *EmptyLogger) Warnf(format string, args ...interface{})  {}
+func (e *EmptyLogger) Errorf(format string, args ...interface{}) {}
+func (e *EmptyLogger) Fatalf(format string, args ...interface{}) {}
+
 // 纯文本日志方法
 func (e *EmptyLogger) DebugMsg(msg string) {}
 func (e *EmptyLogger) InfoMsg(msg string)  {}
@@ -68,9 +75,9 @@ func (e *EmptyLogger) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (e *EmptyLogger) FatalKV(msg string, keysAndValues ...interface{}) {}
 
 // 原始日志条目方法
-func (e *EmptyLogger) Log(level LogLevel, msg string) {}
-func (e *EmptyLogger) LogContext(ctx context.Context, level LogLevel, msg string) {}
-func (e *EmptyLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {}
+func (e *EmptyLogger) Log(level LogLevel, msg string)                                          {}
+func (e *EmptyLogger) LogContext(ctx context.Context, level LogLevel, msg string)              {}
+func (e *EmptyLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{})          {}
 func (e *EmptyLogger) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {}
 
 // 配置方法
@@ -121,9 +128,9 @@ func (e *EmptyLogger) Clone() ILogger {
 }
 
 // 兼容标准log包的方法
-func (e *EmptyLogger) Print(args ...interface{}) {}
+func (e *EmptyLogger) Print(args ...interface{})                 {}
 func (e *EmptyLogger) Printf(format string, args ...interface{}) {}
-func (e *EmptyLogger) Println(args ...interface{}) {}
+func (e *EmptyLogger) Println(args ...interface{})               {}
 
 // GetStats 返回统计信息
 func (e *EmptyLogger) GetStats() *LoggerStats {
@@ -225,7 +232,7 @@ func (e *EmptyWriter) IsHealthy() bool {
 func (e *EmptyWriter) GetStats() interface{} {
 	e.mutex.Lock()
 	defer e.mutex.Unlock()
-	
+
 	result := make(map[string]interface{})
 	for k, v := range e.stats {
 		result[k] = v
@@ -316,10 +323,10 @@ func (e *EmptyFormatter) GetName() string {
 var (
 	// NoLogger 全局的空日志实例，用于禁用所有日志输出
 	NoLogger ILogger = NewEmptyLogger()
-	
+
 	// DiscardLogger 废弃所有日志的实例，与NoLogger功能相同
 	DiscardLogger ILogger = NewEmptyLogger()
-	
+
 	// NullLogger 空日志实例，用于测试场景
 	NullLogger ILogger = NewEmptyLogger()
 )
@@ -347,7 +354,7 @@ func WrapWithEmpty(original ILogger) ILogger {
 	if IsEmptyLogger(original) {
 		return original
 	}
-	
+
 	empty := NewEmptyLogger()
 	if original != nil {
 		empty.SetLevel(original.GetLevel())
