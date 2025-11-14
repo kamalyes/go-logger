@@ -578,6 +578,13 @@ func (m *MockAdapter) Warn(format string, args ...interface{})  {}
 func (m *MockAdapter) Error(format string, args ...interface{}) {}
 func (m *MockAdapter) Fatal(format string, args ...interface{}) {}
 
+// Printf风格方法（与上面相同，但命名更明确）
+func (m *MockAdapter) Debugf(format string, args ...interface{}) {}
+func (m *MockAdapter) Infof(format string, args ...interface{})  {}
+func (m *MockAdapter) Warnf(format string, args ...interface{})  {}
+func (m *MockAdapter) Errorf(format string, args ...interface{}) {}
+func (m *MockAdapter) Fatalf(format string, args ...interface{}) {}
+
 func (m *MockAdapter) SetLevel(level LogLevel) {
 	m.level = level
 }
@@ -644,9 +651,9 @@ func (m *MockAdapter) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (m *MockAdapter) FatalKV(msg string, keysAndValues ...interface{}) {}
 
 // 原始日志条目方法
-func (m *MockAdapter) Log(level LogLevel, msg string) {}
-func (m *MockAdapter) LogContext(ctx context.Context, level LogLevel, msg string) {}
-func (m *MockAdapter) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) Log(level LogLevel, msg string)                                          {}
+func (m *MockAdapter) LogContext(ctx context.Context, level LogLevel, msg string)              {}
+func (m *MockAdapter) LogKV(level LogLevel, msg string, keysAndValues ...interface{})          {}
 func (m *MockAdapter) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {}
 
 // WithContext 的实现
@@ -655,9 +662,9 @@ func (m *MockAdapter) WithContext(ctx context.Context) ILogger {
 }
 
 // 兼容标准log包的方法
-func (m *MockAdapter) Print(args ...interface{}) {}
+func (m *MockAdapter) Print(args ...interface{})                 {}
 func (m *MockAdapter) Printf(format string, args ...interface{}) {}
-func (m *MockAdapter) Println(args ...interface{}) {}
+func (m *MockAdapter) Println(args ...interface{})               {}
 
 func (m *MockAdapter) Clone() ILogger {
 	clone := &MockAdapter{
@@ -849,11 +856,11 @@ func TestEdgeCases(t *testing.T) {
 	t.Run("ConfigValidation", func(t *testing.T) {
 		// 测试各种配置边界情况
 		config := &AdapterConfig{
-			Type:    StandardAdapter,
-			Name:    "test",
-			Level:   LogLevel(999), // 无效级别
-			Output:  nil,
-			Fields:  nil,
+			Type:   StandardAdapter,
+			Name:   "test",
+			Level:  LogLevel(999), // 无效级别
+			Output: nil,
+			Fields: nil,
 		}
 
 		err := config.Validate()
