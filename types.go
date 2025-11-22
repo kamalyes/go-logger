@@ -24,31 +24,31 @@ type Logger struct {
 	level      LogLevel
 	showCaller bool
 	config     *LogConfig
-	
+
 	// 内部组件
 	logger     *log.Logger
 	formatter  IFormatter
 	writers    []IWriter
 	hooks      []IHook
 	middleware []IMiddleware
-	
+
 	// 同步和上下文
 	context context.Context
 	cancel  context.CancelFunc
-	
+
 	// 统计信息
 	stats *LoggerStats
 }
 
 // LoggerStats 日志统计信息
 type LoggerStats struct {
-	StartTime    time.Time            `json:"start_time"`
-	TotalLogs    int64                `json:"total_logs"`
-	LevelCounts  map[LogLevel]int64   `json:"level_counts"`
-	ErrorCount   int64                `json:"error_count"`
-	LastLogTime  time.Time            `json:"last_log_time"`
-	Uptime       time.Duration        `json:"uptime"`
-	BytesWritten int64                `json:"bytes_written"`
+	StartTime    time.Time          `json:"start_time"`
+	TotalLogs    int64              `json:"total_logs"`
+	LevelCounts  map[LogLevel]int64 `json:"level_counts"`
+	ErrorCount   int64              `json:"error_count"`
+	LastLogTime  time.Time          `json:"last_log_time"`
+	Uptime       time.Duration      `json:"uptime"`
+	BytesWritten int64              `json:"bytes_written"`
 	mutex        sync.RWMutex
 }
 
@@ -64,12 +64,12 @@ func NewLoggerStats() *LoggerStats {
 func (s *LoggerStats) IncrementLevel(level LogLevel) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	
+
 	s.TotalLogs++
 	s.LevelCounts[level]++
 	s.LastLogTime = time.Now()
 	s.Uptime = time.Since(s.StartTime)
-	
+
 	if level >= ERROR {
 		s.ErrorCount++
 	}
@@ -84,20 +84,20 @@ func (s *LoggerStats) AddBytes(bytes int64) {
 
 // LoggerStatsSnapshot 统计信息快照
 type LoggerStatsSnapshot struct {
-	StartTime    time.Time            `json:"start_time"`
-	TotalLogs    int64                `json:"total_logs"`
-	LevelCounts  map[LogLevel]int64   `json:"level_counts"`
-	ErrorCount   int64                `json:"error_count"`
-	LastLogTime  time.Time            `json:"last_log_time"`
-	Uptime       time.Duration        `json:"uptime"`
-	BytesWritten int64                `json:"bytes_written"`
+	StartTime    time.Time          `json:"start_time"`
+	TotalLogs    int64              `json:"total_logs"`
+	LevelCounts  map[LogLevel]int64 `json:"level_counts"`
+	ErrorCount   int64              `json:"error_count"`
+	LastLogTime  time.Time          `json:"last_log_time"`
+	Uptime       time.Duration      `json:"uptime"`
+	BytesWritten int64              `json:"bytes_written"`
 }
 
 // GetStats 获取统计信息快照
 func (s *LoggerStats) GetStats() LoggerStatsSnapshot {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
-	
+
 	// 创建一个新的快照避免复制 mutex
 	stats := LoggerStatsSnapshot{
 		StartTime:    s.StartTime,
@@ -108,21 +108,21 @@ func (s *LoggerStats) GetStats() LoggerStatsSnapshot {
 		BytesWritten: s.BytesWritten,
 		LevelCounts:  make(map[LogLevel]int64),
 	}
-	
+
 	for k, v := range s.LevelCounts {
 		stats.LevelCounts[k] = v
 	}
-	
+
 	return stats
 }
 
 // LoggerOptions 创建Logger时的选项
 type LoggerOptions struct {
-	Config     *LogConfig    `json:"config"`
-	Formatter  IFormatter    `json:"-"`
-	Writers    []IWriter     `json:"-"`
-	Hooks      []IHook       `json:"-"`
-	Middleware []IMiddleware `json:"-"`
+	Config     *LogConfig      `json:"config"`
+	Formatter  IFormatter      `json:"-"`
+	Writers    []IWriter       `json:"-"`
+	Hooks      []IHook         `json:"-"`
+	Middleware []IMiddleware   `json:"-"`
 	Context    context.Context `json:"-"`
 }
 
@@ -139,68 +139,6 @@ func DefaultLoggerOptions() *LoggerOptions {
 
 // FieldMap 字段映射类型
 type FieldMap map[string]interface{}
-
-// LogContext 日志上下文
-type LogContext struct {
-	RequestID   string    `json:"request_id,omitempty"`
-	UserID      string    `json:"user_id,omitempty"`
-	SessionID   string    `json:"session_id,omitempty"`
-	Operation   string    `json:"operation,omitempty"`
-	Component   string    `json:"component,omitempty"`
-	Version     string    `json:"version,omitempty"`
-	Environment string    `json:"environment,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
-	Fields      FieldMap  `json:"fields,omitempty"`
-}
-
-// NewLogContext 创建新的日志上下文
-func NewLogContext() *LogContext {
-	return &LogContext{
-		Timestamp: time.Now(),
-		Fields:    make(FieldMap),
-	}
-}
-
-// WithField 添加字段
-func (lc *LogContext) WithField(key string, value interface{}) *LogContext {
-	if lc.Fields == nil {
-		lc.Fields = make(FieldMap)
-	}
-	lc.Fields[key] = value
-	return lc
-}
-
-// WithFields 添加多个字段
-func (lc *LogContext) WithFields(fields FieldMap) *LogContext {
-	if lc.Fields == nil {
-		lc.Fields = make(FieldMap)
-	}
-	for k, v := range fields {
-		lc.Fields[k] = v
-	}
-	return lc
-}
-
-// Clone 克隆上下文
-func (lc *LogContext) Clone() *LogContext {
-	clone := &LogContext{
-		RequestID:   lc.RequestID,
-		UserID:      lc.UserID,
-		SessionID:   lc.SessionID,
-		Operation:   lc.Operation,
-		Component:   lc.Component,
-		Version:     lc.Version,
-		Environment: lc.Environment,
-		Timestamp:   lc.Timestamp,
-		Fields:      make(FieldMap),
-	}
-	
-	for k, v := range lc.Fields {
-		clone.Fields[k] = v
-	}
-	
-	return clone
-}
 
 // AdapterRegistry 适配器注册表
 type AdapterRegistry struct {
@@ -230,11 +168,11 @@ func (r *AdapterRegistry) Create(name string, config *AdapterConfig) (IAdapter, 
 	r.mutex.RLock()
 	factory, exists := r.adapters[name]
 	r.mutex.RUnlock()
-	
+
 	if !exists {
-				return nil, fmt.Errorf("adapter factory '%s' not found", name)
+		return nil, fmt.Errorf("adapter factory '%s' not found", name)
 	}
-	
+
 	return factory(config)
 }
 
@@ -242,7 +180,7 @@ func (r *AdapterRegistry) Create(name string, config *AdapterConfig) (IAdapter, 
 func (r *AdapterRegistry) List() []string {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	names := make([]string, 0, len(r.adapters))
 	for name := range r.adapters {
 		names = append(names, name)
@@ -294,13 +232,12 @@ const (
 
 // LogEvent 日志事件
 type LogEvent struct {
-	Type      EventType   `json:"type"`
-	Timestamp time.Time   `json:"timestamp"`
-	Level     LogLevel    `json:"level"`
-	Message   string      `json:"message"`
-	Fields    FieldMap    `json:"fields,omitempty"`
-	Error     error       `json:"error,omitempty"`
-	Context   *LogContext `json:"context,omitempty"`
+	Type      EventType `json:"type"`
+	Timestamp time.Time `json:"timestamp"`
+	Level     LogLevel  `json:"level"`
+	Message   string    `json:"message"`
+	Fields    FieldMap  `json:"fields,omitempty"`
+	Error     error     `json:"error,omitempty"`
 }
 
 // NewLogEvent 创建日志事件
@@ -320,14 +257,14 @@ func NewLoggerWithOptions(options *LoggerOptions) *Logger {
 	if options == nil {
 		options = DefaultLoggerOptions()
 	}
-	
+
 	// 创建上下文
 	ctx := options.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	
+
 	logger := &Logger{
 		level:      options.Config.Level,
 		showCaller: options.Config.ShowCaller,
@@ -341,16 +278,16 @@ func NewLoggerWithOptions(options *LoggerOptions) *Logger {
 		stats:      NewLoggerStats(),
 		logger:     log.New(options.Config.Output, options.Config.Prefix, log.LstdFlags),
 	}
-	
+
 	// 如果没有指定格式化器，使用默认的
 	if logger.formatter == nil {
 		logger.formatter = NewTextFormatter()
 	}
-	
+
 	// 如果没有写入器，添加默认控制台写入器
 	if len(logger.writers) == 0 {
 		logger.writers = append(logger.writers, NewConsoleWriter(options.Config.Output))
 	}
-	
+
 	return logger
 }

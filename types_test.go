@@ -15,12 +15,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
 // TypesTestSuite 核心类型测试套件
@@ -31,7 +30,7 @@ type TypesTestSuite struct {
 // TestLoggerStats 测试日志统计
 func (suite *TypesTestSuite) TestLoggerStats() {
 	stats := NewLoggerStats()
-	
+
 	// 验证初始状态
 	assert.NotNil(suite.T(), stats)
 	assert.False(suite.T(), stats.StartTime.IsZero())
@@ -137,71 +136,10 @@ func (suite *TypesTestSuite) TestLoggerOptions() {
 	assert.Equal(suite.T(), DEBUG, options.Config.Level)
 }
 
-// TestLogContext 测试日志上下文
-func (suite *TypesTestSuite) TestLogContext() {
-	// 测试新上下文创建
-	ctx := NewLogContext()
-	assert.NotNil(suite.T(), ctx)
-	assert.False(suite.T(), ctx.Timestamp.IsZero())
-	assert.NotNil(suite.T(), ctx.Fields)
-	assert.Empty(suite.T(), ctx.Fields)
-
-	// 测试设置基本字段
-	ctx.RequestID = "req-123"
-	ctx.UserID = "user-456"
-	ctx.SessionID = "sess-789"
-	ctx.Operation = "test-op"
-	ctx.Component = "test-component"
-	ctx.Version = "1.0.0"
-	ctx.Environment = "test"
-
-	assert.Equal(suite.T(), "req-123", ctx.RequestID)
-	assert.Equal(suite.T(), "user-456", ctx.UserID)
-	assert.Equal(suite.T(), "sess-789", ctx.SessionID)
-	assert.Equal(suite.T(), "test-op", ctx.Operation)
-	assert.Equal(suite.T(), "test-component", ctx.Component)
-	assert.Equal(suite.T(), "1.0.0", ctx.Version)
-	assert.Equal(suite.T(), "test", ctx.Environment)
-
-	// 测试添加单个字段
-	result := ctx.WithField("key1", "value1")
-	assert.Equal(suite.T(), ctx, result) // 应该返回同一实例
-	assert.Equal(suite.T(), "value1", ctx.Fields["key1"])
-
-	// 测试添加多个字段
-	fields := FieldMap{
-		"key2": "value2",
-		"key3": 123,
-		"key4": true,
-	}
-	ctx.WithFields(fields)
-	assert.Equal(suite.T(), "value2", ctx.Fields["key2"])
-	assert.Equal(suite.T(), 123, ctx.Fields["key3"])
-	assert.Equal(suite.T(), true, ctx.Fields["key4"])
-
-	// 测试克隆上下文
-	cloned := ctx.Clone()
-	assert.NotSame(suite.T(), ctx, cloned) // 使用NotSame而不是NotEqual
-	assert.Equal(suite.T(), ctx.RequestID, cloned.RequestID)
-	assert.Equal(suite.T(), ctx.UserID, cloned.UserID)
-	assert.Equal(suite.T(), ctx.SessionID, cloned.SessionID)
-	assert.Equal(suite.T(), ctx.Operation, cloned.Operation)
-	assert.Equal(suite.T(), ctx.Component, cloned.Component)
-	assert.Equal(suite.T(), ctx.Version, cloned.Version)
-	assert.Equal(suite.T(), ctx.Environment, cloned.Environment)
-	assert.Equal(suite.T(), ctx.Timestamp, cloned.Timestamp)
-	assert.Equal(suite.T(), ctx.Fields, cloned.Fields)
-
-	// 修改克隆应该不影响原上下文
-	cloned.WithField("clone_key", "clone_value")
-	assert.NotContains(suite.T(), ctx.Fields, "clone_key")
-	assert.Contains(suite.T(), cloned.Fields, "clone_key")
-}
-
 // TestFieldMap 测试字段映射
 func (suite *TypesTestSuite) TestFieldMap() {
 	fields := make(FieldMap)
-	
+
 	// 测试添加不同类型的值
 	fields["string"] = "test"
 	fields["int"] = 42
@@ -327,7 +265,7 @@ func (suite *TypesTestSuite) TestBufferPool() {
 
 	// 测试归还过大的缓冲区
 	largeBuf := make([]byte, 100*1024) // 100KB
-	pool.Put(largeBuf) // 应该被丢弃而不是保存
+	pool.Put(largeBuf)                 // 应该被丢弃而不是保存
 }
 
 // TestBufferPoolConcurrency 测试缓冲区池并发安全
@@ -368,17 +306,15 @@ func (suite *TypesTestSuite) TestLogEvent() {
 	assert.NotNil(suite.T(), event.Fields)
 	assert.Empty(suite.T(), event.Fields)
 	assert.Nil(suite.T(), event.Error)
-	assert.Nil(suite.T(), event.Context)
 
 	// 测试设置字段
 	event.Fields["key"] = "value"
 	event.Error = errors.New("test error")
-	event.Context = NewLogContext()
+	// Context field removed
 
 	assert.Equal(suite.T(), "value", event.Fields["key"])
 	assert.NotNil(suite.T(), event.Error)
 	assert.Equal(suite.T(), "test error", event.Error.Error())
-	assert.NotNil(suite.T(), event.Context)
 }
 
 // TestEventTypes 测试事件类型
@@ -451,34 +387,9 @@ func (suite *TypesTestSuite) TestLoggerOptionsDefaults() {
 	logger := NewLoggerWithOptions(nil)
 	assert.NotNil(suite.T(), logger.formatter)
 	assert.NotEmpty(suite.T(), logger.writers)
-	
+
 	// 清理
 	logger.cancel()
-}
-
-// TestLogContextEdgeCases 测试日志上下文边界情况
-func (suite *TypesTestSuite) TestLogContextEdgeCases() {
-	ctx := NewLogContext()
-
-	// 测试添加nil字段
-	ctx.WithField("nil_field", nil)
-	assert.Nil(suite.T(), ctx.Fields["nil_field"])
-
-	// 测试添加空字段映射
-	ctx.WithFields(nil)
-	// 应该不崩溃
-
-	ctx.WithFields(FieldMap{})
-	// 应该不崩溃
-
-	// 测试空字符串字段
-	ctx.WithField("", "empty_key")
-	assert.Equal(suite.T(), "empty_key", ctx.Fields[""])
-
-	// 测试重复字段键
-	ctx.WithField("duplicate", "first")
-	ctx.WithField("duplicate", "second")
-	assert.Equal(suite.T(), "second", ctx.Fields["duplicate"])
 }
 
 // 运行测试套件
@@ -503,26 +414,6 @@ func TestTypesPerformance(t *testing.T) {
 		t.Logf("10000 stat operations took %v", duration)
 		assert.True(t, duration < time.Second,
 			"Stats operations should be fast, took %v", duration)
-	})
-
-	t.Run("LogContext", func(t *testing.T) {
-		start := time.Now()
-
-		for i := 0; i < 1000; i++ {
-			ctx := NewLogContext()
-			ctx.WithField("key1", "value1")
-			ctx.WithField("key2", i)
-			ctx.WithFields(FieldMap{
-				"key3": "value3",
-				"key4": float64(i) * 3.14,
-			})
-			_ = ctx.Clone()
-		}
-
-		duration := time.Since(start)
-		t.Logf("1000 context operations took %v", duration)
-		assert.True(t, duration < time.Second,
-			"Context operations should be fast, took %v", duration)
 	})
 
 	t.Run("BufferPool", func(t *testing.T) {

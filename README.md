@@ -22,11 +22,25 @@
 
 ## 📚 文档导航
 
-- 📊 **[性能详解](PERFORMANCE.md)** - 深入了解性能优化技术和基准测试结果
-- 🔄 **[迁移指南](MIGRATION.md)** - 从其他日志库迁移的完整指南
+### 📖 官方文档
+- [🏠 项目主页](https://github.com/kamalyes/go-logger)
+- [📖 API 文档](https://pkg.go.dev/github.com/kamalyes/go-logger)
+- [📊 代码覆盖率](https://codecov.io/gh/kamalyes/go-logger)
+
+### 📋 技术文档
+- 📊 **[性能详解](docs/PERFORMANCE.md)** - 深入了解性能优化技术和基准测试结果
+- 🔄 **[迁移指南](docs/MIGRATION.md)** - 从其他日志库迁移的完整指南
+- 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
+- 📝 **[更新日志](docs/CHANGELOG.md)** - 版本更新和功能变更记录
+
+### 🔗 代码资源
 - 📋 **[示例代码](examples/)** - 丰富的使用示例和最佳实践
 - 🧪 **[基准测试](benchmark_test.go)** - 性能测试和对比分析
 - ⚡ **[极速日志器](ultra_fast_logger.go)** - 极致性能实现源码
+
+### 💬 社区支持
+- [🐛 问题反馈](https://github.com/kamalyes/go-logger/issues)
+- [💬 讨论区](https://github.com/kamalyes/go-logger/discussions)
 
 ## 🚀 为什么选择 go-logger？
 
@@ -38,9 +52,10 @@
 
 ### 核心功能
 - **📊 内存监控系统**：实时监控内存使用、GC性能、堆分析，支持内存泄漏检测
-- **🔍 分布式追踪**：内置请求ID、追踪ID、相关性管理，支持微服务链路追踪
+- **🔍 分布式追踪**：统一的Context服务架构，支持TraceID、SpanID、CorrelationID等多维度追踪
 - **🎯 多级日志系统**：支持24种日志级别，从TRACE到PROFILING，满足不同场景需求
 - **📈 性能监控**：实时统计操作性能、延迟分析、吞吐量监控
+- **⚡ 架构重构**：Context管理代码减少88%，从1059行优化到128行，性能显著提升
 
 ### 企业级功能
 - **🛡️ 内存安全**：智能内存管理、GC优化、内存压力检测与自动释放
@@ -114,29 +129,46 @@ healthy, pressure := monitor.QuickCheck()
 fmt.Printf("系统健康: %v, 内存压力: %s", healthy, pressure)
 ```
 
-📖 **[查看详细性能分析 →](PERFORMANCE.md)**
+📖 **[查看详细性能分析 →](docs/PERFORMANCE.md)**
 
 ## 🏗️ 架构设计
+
+### 核心架构重构 ✨
+经过重大重构，go-logger 实现了架构简化和性能优化：
+
+- **🚀 代码减少88%**：Context管理从1059行优化到128行
+- **🔧 统一服务架构**：单一ContextService替代多个管理器
+- **⚡ 性能提升**：简化的调用链和优化的内存使用
+- **🎯 API兼容性**：保持所有公共API接口不变
 
 ### 模块化架构
 ```
 go-logger/
-├── config/          # 配置管理模块
-│   ├── base.go      # 基础配置
-│   ├── adapter.go   # 适配器配置
-│   ├── output.go    # 输出配置
-│   └── level.go     # 日志级别配置
-├── context/         # 上下文管理模块
-│   ├── manager.go   # 上下文管理器
-│   └── correlation.go # 相关性追踪
-├── level/           # 日志级别管理
-│   ├── constants.go # 级别常量定义
-│   └── manager.go   # 级别管理器
-├── metrics/         # 监控指标模块
-│   ├── stats.go     # 统计收集
-│   ├── performance.go # 性能监控
-│   └── memory.go    # 内存监控
+├── config/              # 配置管理模块
+│   ├── base.go          # 基础配置
+│   ├── adapter.go       # 适配器配置
+│   ├── output.go        # 输出配置
+│   └── level.go         # 日志级别配置
+├── context_service.go   # 统一上下文服务（新架构核心）
+├── level/               # 日志级别管理
+│   ├── constants.go     # 级别常量定义
+│   └── manager.go       # 级别管理器
+├── metrics/             # 监控指标模块
+│   ├── stats.go         # 统计收集
+│   ├── performance.go   # 性能监控
+│   └── memory.go        # 内存监控
+├── docs/                # 文档目录
+│   ├── CONTEXT_USAGE.md # Context使用指南
+│   ├── PERFORMANCE.md   # 性能详解
+│   └── MIGRATION.md     # 迁移指南
+└── examples/            # 示例代码
 ```
+
+### Context服务架构
+- **ContextService**：统一的上下文管理服务
+- **简化设计**：移除复杂的管理器层级结构  
+- **全局函数**：直接的API调用，无需管理器实例
+- **字段提取**：高效的多维度上下文信息提取
 
 ### 内存监控架构
 - **MemoryMonitor接口**：定义标准监控能力
@@ -189,7 +221,59 @@ func main() {
     // 🛡️ 全功能企业版 (默认)
     logger := logger.New()
     logger.Info("Full featured logging")
-    logger.InfoCtx(context.Background(), "Context aware logging")
+    
+    // 🎯 Context使用（统一架构）
+    ctx := context.Background()
+    ctx = logger.WithTraceID(ctx, "trace-123")
+    ctx = logger.WithUserID(ctx, "user-456")
+    
+    // 直接获取ID（简化API）
+    traceID := logger.GetTraceID(ctx)
+    userID := logger.GetUserID(ctx)
+    
+    // 自动提取所有字段
+    logger.InfoWithContext(ctx, logger, "带上下文的日志")
+}
+```
+
+### Context管理（重构后）
+
+```go
+// ✨ 新的统一架构 - 简单直观
+func modernContextUsage() {
+    ctx := context.Background()
+    
+    // 设置各种ID（统一接口）
+    ctx = logger.WithTraceID(ctx, "trace-123")
+    ctx = logger.WithSpanID(ctx, "span-456") 
+    ctx = logger.WithUserID(ctx, "user-789")
+    ctx = logger.WithTenantID(ctx, "tenant-001")
+    
+    // 获取ID（直接简单）
+    traceID := logger.GetTraceID(ctx)      // "trace-123"
+    spanID := logger.GetSpanID(ctx)        // "span-456"
+    userID := logger.GetUserID(ctx)        // "user-789"
+    
+    // 自动生成ID
+    ctx, newTraceID := logger.GetOrGenerateTraceID(ctx)
+    
+    // 批量提取所有字段
+    fields := logger.ExtractFields(ctx)
+    // fields = {
+    //   "trace_id": "trace-123",
+    //   "span_id": "span-456", 
+    //   "user_id": "user-789",
+    //   "tenant_id": "tenant-001"
+    // }
+    
+    // 创建Span（继承TraceID）
+    spanCtx := logger.CreateSpan(ctx, "database_query")
+    
+    // 相关性链追踪
+    chain, corrCtx := logger.CreateCorrelationChain(ctx)
+    chain.SetTag("operation", "user_login")
+    chain.SetMetric("duration_ms", 150)
+    defer logger.EndCorrelationChain(chain)
 }
 ```
 
@@ -422,38 +506,6 @@ BenchmarkMemoryMonitor_CheckMemoryLeaks-8  	 10000	    156789 ns/op	   12345 B/o
 BenchmarkStatsCollector_RecordOperation-8  	1000000	      1234 ns/op	     256 B/op	       5 allocs/op
 BenchmarkPerformanceMonitor_GetStats-8     	 500000	      2345 ns/op	     512 B/op	      12 allocs/op
 ```
-
-## 📝 更新日志
-
-### v1.3.0 (2025-11-07)
-- ✨ 新增内存监控系统
-- ✨ 实现测试套件架构
-- 🔧 优化内存泄漏检测算法
-- 📈 提升测试覆盖率至91.7%
-- 🐛 修复并发访问问题
-- 📚 完善文档和示例
-
-### v1.2.0 (2025-11-06)
-- ✨ 新增性能监控模块
-- ✨ 实现分布式追踪功能
-- 🔧 优化配置管理系统
-- 📊 添加统计收集功能
-
-### v1.1.0 (2025-11-05)
-- ✨ 新增24级日志系统
-- ✨ 实现模块化架构
-- 🔧 优化日志级别管理
-- 📈 提升整体性能
-
-## 🔗 相关链接
-
-- [🏠 项目主页](https://github.com/kamalyes/go-logger)
-- [📖 API 文档](https://pkg.go.dev/github.com/kamalyes/go-logger)
-- [📚 使用示例](examples/) - 完整示例代码
-- [🚀 迁移指南](MIGRATION.md) - 从其他日志库迁移
-- [🐛 问题反馈](https://github.com/kamalyes/go-logger/issues)
-- [💬 讨论区](https://github.com/kamalyes/go-logger/discussions)
-- [📊 代码覆盖率](https://codecov.io/gh/kamalyes/go-logger)
 
 ## ⭐ Star 历史
 
