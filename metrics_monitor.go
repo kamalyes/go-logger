@@ -2,14 +2,14 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-09 11:40:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 13:18:54
- * @FilePath: \go-logger\metrics\monitor.go
+ * @LastEditTime: 2025-11-22 12:29:19
+ * @FilePath: \go-logger\metrics_monitor.go
  * @Description: 高性能监控器 - 替换原有低性能实现
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 
-package metrics
+package logger
 
 import (
 	"fmt"
@@ -33,22 +33,21 @@ type Monitor struct {
 
 // NewDefaultMemoryMonitor 创建一个具有默认设置的 DefaultMemoryMonitor
 func NewDefaultMemoryMonitor() *DefaultMemoryMonitor {
-    return &DefaultMemoryMonitor{
-        sampleInterval:      100 * time.Millisecond,
-        threshold:           80.0,
-        maxMemory:           0,
-        gcPercent:           100,
-        maxHistorySize:      100,
-        maxSnapshots:        5,
-        enableGCTuning:      false,
-        leakDetectionEnabled: false,
-        memoryHistory:       make([]MemoryInfo, 0),
-        gcHistory:           make([]GCInfo, 0),
-        heapHistory:         make([]HeapInfo, 0),
-        snapshots:           make([]*HeapSnapshot, 0),
-    }
+	return &DefaultMemoryMonitor{
+		sampleInterval:       100 * time.Millisecond,
+		threshold:            80.0,
+		maxMemory:            0,
+		gcPercent:            100,
+		maxHistorySize:       100,
+		maxSnapshots:         5,
+		enableGCTuning:       false,
+		leakDetectionEnabled: false,
+		memoryHistory:        make([]MemoryInfo, 0),
+		gcHistory:            make([]GCInfo, 0),
+		heapHistory:          make([]HeapInfo, 0),
+		snapshots:            make([]*HeapSnapshot, 0),
+	}
 }
-
 
 // NewMonitor 创建高性能监控器
 func NewMonitor() *Monitor {
@@ -63,7 +62,7 @@ func (m *Monitor) Track() func(error) {
 	if atomic.LoadInt64(&m.enabled) == 0 {
 		return func(error) {} // 零开销
 	}
-	
+
 	atomic.AddUint64(&m.totalOps, 1)
 	return func(err error) {
 		if err != nil {
@@ -76,24 +75,24 @@ func (m *Monitor) Track() func(error) {
 func (m *Monitor) FastMemory() (heap uint64) {
 	now := time.Now().UnixNano()
 	last := atomic.LoadInt64(&m.lastCheck)
-	
+
 	// 限制检查频率 - 1秒最多检查一次
 	if now-last < 1000000000 {
 		return atomic.LoadUint64(&m.currentMemory)
 	}
-	
+
 	// CAS更新，避免重复检查
 	if !atomic.CompareAndSwapInt64(&m.lastCheck, last, now) {
 		return atomic.LoadUint64(&m.currentMemory)
 	}
-	
+
 	// 快速内存读取
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	
+
 	heap = ms.HeapAlloc
 	atomic.StoreUint64(&m.currentMemory, heap)
-	
+
 	// 更新峰值
 	for {
 		peak := atomic.LoadUint64(&m.peakMemory)
@@ -104,14 +103,14 @@ func (m *Monitor) FastMemory() (heap uint64) {
 			break
 		}
 	}
-	
+
 	return heap
 }
 
 // Update 更新内存追踪 - 53ns/op
 func (m *Monitor) Update(heapBytes uint64) bool {
 	atomic.StoreUint64(&m.currentMemory, heapBytes)
-	
+
 	// 更新峰值
 	for {
 		peak := atomic.LoadUint64(&m.peakMemory)
@@ -122,7 +121,7 @@ func (m *Monitor) Update(heapBytes uint64) bool {
 			break
 		}
 	}
-	
+
 	// 检查阈值
 	if heapBytes > atomic.LoadUint64(&m.threshold) {
 		atomic.AddUint64(&m.warnings, 1)
@@ -135,7 +134,7 @@ func (m *Monitor) Update(heapBytes uint64) bool {
 func (m *Monitor) QuickCheck() (healthy bool, pressure string) {
 	heap := m.FastMemory()
 	threshold := atomic.LoadUint64(&m.threshold)
-	
+
 	if heap > threshold {
 		return false, "critical"
 	} else if heap > threshold*3/4 {
@@ -153,7 +152,7 @@ func (m *Monitor) Stats() (ops, errors, current, peak, warnings uint64, errorRat
 	current = atomic.LoadUint64(&m.currentMemory)
 	peak = atomic.LoadUint64(&m.peakMemory)
 	warnings = atomic.LoadUint64(&m.warnings)
-	
+
 	if ops > 0 {
 		errorRate = float64(errors) / float64(ops)
 	}
@@ -179,12 +178,12 @@ func (m *Monitor) Disable() {
 func (m *Monitor) String() string {
 	ops, errors, current, peak, warnings, rate := m.Stats()
 	enabled := atomic.LoadInt64(&m.enabled) == 1
-	
+
 	status := "disabled"
 	if enabled {
 		status = "enabled"
 	}
-	
+
 	return fmt.Sprintf("Monitor[%s] ops=%d errors=%d(%.1f%%) mem=%dMB peak=%dMB warnings=%d",
 		status, ops, errors, rate*100, current/1024/1024, peak/1024/1024, warnings)
 }

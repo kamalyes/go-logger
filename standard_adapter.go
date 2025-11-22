@@ -44,7 +44,7 @@ func NewStandardAdapter(config *AdapterConfig) (IAdapter, error) {
 	// 创建Logger配置
 	logConfig := &LogConfig{
 		Level:      config.Level,
-		ShowCaller: true,
+		ShowCaller: config.ShowCaller,
 		Prefix:     prefix,
 		Output:     config.Output,
 		Colorful:   config.Colorful,

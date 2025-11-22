@@ -43,10 +43,10 @@ func NewLoggerFactory() *LoggerFactory {
 		hooks:       make(map[string]func(config interface{}) (IHook, error)),
 		middlewares: make(map[string]func(config interface{}) (IMiddleware, error)),
 	}
-	
+
 	// 注册默认组件
 	factory.registerDefaultComponents()
-	
+
 	return factory
 }
 
@@ -60,49 +60,49 @@ func (f *LoggerFactory) registerDefaultComponents() {
 		// 这里可以添加配置解析逻辑
 		return NewConsoleWriter(os.Stdout), nil
 	})
-	
+
 	f.RegisterWriter("file", func(config interface{}) (IWriter, error) {
 		configMap, ok := config.(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("invalid file writer config")
 		}
-		
+
 		filePath, ok := configMap["file_path"].(string)
 		if !ok {
 			return nil, fmt.Errorf("file_path is required for file writer")
 		}
-		
+
 		return NewFileWriter(filePath), nil
 	})
-	
+
 	f.RegisterWriter("rotate", func(config interface{}) (IWriter, error) {
 		configMap, ok := config.(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("invalid rotate writer config")
 		}
-		
+
 		filePath, ok := configMap["file_path"].(string)
 		if !ok {
 			return nil, fmt.Errorf("file_path is required for rotate writer")
 		}
-		
+
 		maxSize := int64(100 * 1024 * 1024) // 默认100MB
 		if size, exists := configMap["max_size"]; exists {
 			if sizeVal, ok := size.(int64); ok {
 				maxSize = sizeVal
 			}
 		}
-		
+
 		maxFiles := 5 // 默认5个文件
 		if files, exists := configMap["max_files"]; exists {
 			if filesVal, ok := files.(int); ok {
 				maxFiles = filesVal
 			}
 		}
-		
+
 		return NewRotateWriter(filePath, maxSize, maxFiles), nil
 	})
-	
+
 	// 注册钩子
 	f.RegisterHook("console", func(config interface{}) (IHook, error) {
 		levels := AllLevels
@@ -116,33 +116,33 @@ func (f *LoggerFactory) registerDefaultComponents() {
 		}
 		return NewConsoleHook(levels), nil
 	})
-	
+
 	f.RegisterHook("file", func(config interface{}) (IHook, error) {
 		configMap, ok := config.(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("invalid file hook config")
 		}
-		
+
 		filePath, ok := configMap["file_path"].(string)
 		if !ok {
 			return nil, fmt.Errorf("file_path is required for file hook")
 		}
-		
+
 		levels := AllLevels
 		return NewFileHook(filePath, levels), nil
 	})
-	
+
 	f.RegisterHook("webhook", func(config interface{}) (IHook, error) {
 		configMap, ok := config.(map[string]interface{})
 		if !ok {
 			return nil, fmt.Errorf("invalid webhook hook config")
 		}
-		
+
 		url, ok := configMap["url"].(string)
 		if !ok {
 			return nil, fmt.Errorf("url is required for webhook hook")
 		}
-		
+
 		levels := ErrorLevels // 默认只发送错误级别
 		return NewWebhookHook(url, levels), nil
 	})
@@ -184,11 +184,11 @@ func (f *LoggerFactory) CreateWriter(name string, config interface{}) (IWriter, 
 	f.mutex.RLock()
 	factory, exists := f.writers[name]
 	f.mutex.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown writer type: %s", name)
 	}
-	
+
 	return factory(config)
 }
 
@@ -197,11 +197,11 @@ func (f *LoggerFactory) CreateHook(name string, config interface{}) (IHook, erro
 	f.mutex.RLock()
 	factory, exists := f.hooks[name]
 	f.mutex.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown hook type: %s", name)
 	}
-	
+
 	return factory(config)
 }
 
@@ -210,11 +210,11 @@ func (f *LoggerFactory) CreateMiddleware(name string, config interface{}) (IMidd
 	f.mutex.RLock()
 	factory, exists := f.middlewares[name]
 	f.mutex.RUnlock()
-	
+
 	if !exists {
 		return nil, fmt.Errorf("unknown middleware type: %s", name)
 	}
-	
+
 	return factory(config)
 }
 
@@ -286,7 +286,7 @@ func (b *LoggerBuilder) Build() *Logger {
 		Hooks:      b.hooks,
 		Middleware: b.middlewares,
 	}
-	
+
 	return NewLoggerWithOptions(options)
 }
 
@@ -319,7 +319,7 @@ func CreateFileLogger(filePath string, level LogLevel) *Logger {
 	writerConfig := map[string]interface{}{
 		"file_path": filePath,
 	}
-	
+
 	return NewLoggerBuilder().
 		WithConfig(DefaultConfig().WithLevel(level)).
 		WithFormatter(JSONFormatter).
@@ -331,31 +331,31 @@ func CreateFileLogger(filePath string, level LogLevel) *Logger {
 func CreateProductionLogger(logDir string) *Logger {
 	// 控制台输出配置
 	consoleConfig := map[string]interface{}{}
-	
+
 	// 文件输出配置
 	fileConfig := map[string]interface{}{
 		"file_path": logDir + "/app.log",
 		"max_size":  100 * 1024 * 1024, // 100MB
 		"max_files": 10,
 	}
-	
+
 	// 错误文件配置
 	errorConfig := map[string]interface{}{
 		"file_path": logDir + "/error.log",
 		"max_size":  50 * 1024 * 1024, // 50MB
 		"max_files": 5,
 	}
-	
+
 	// 速率限制配置
 	rateLimitConfig := map[string]interface{}{
 		"max_rate":    1000,
 		"time_window": "1s",
 		"burst_size":  100,
 	}
-	
+
 	// 指标中间件配置
 	metricsConfig := map[string]interface{}{}
-	
+
 	return NewLoggerBuilder().
 		WithConfig(DefaultConfig().WithLevel(INFO).WithShowCaller(true)).
 		WithFormatter(JSONFormatter).

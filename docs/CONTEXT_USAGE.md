@@ -4,22 +4,6 @@
 
 `github.com/kamalyes/go-logger` 的 context 包提供了分布式系统中的上下文管理和链路追踪功能，帮助您轻松实现日志的关联和追踪。
 
-## 安装
-
-```bash
-go get github.com/kamalyes/go-logger
-```
-
-## 导入
-
-```go
-import (
-    "context"
-    "github.com/kamalyes/go-logger"
-    logger "github.com/kamalyes/go-logger"
-)
-```
-
 ## 核心概念
 
 ### 追踪 ID 类型

@@ -31,11 +31,11 @@ const (
 // BaseFormatter 基础格式化器
 type BaseFormatter struct {
 	TimeFormat   string            `json:"time_format"`
-	ShowCaller   bool             `json:"show_caller"`
-	ShowLevel    bool             `json:"show_level"`
-	ShowEmoji    bool             `json:"show_emoji"`
-	Colorful     bool             `json:"colorful"`
-	PrettyPrint  bool             `json:"pretty_print"`
+	ShowCaller   bool              `json:"show_caller"`
+	ShowLevel    bool              `json:"show_level"`
+	ShowEmoji    bool              `json:"show_emoji"`
+	Colorful     bool              `json:"colorful"`
+	PrettyPrint  bool              `json:"pretty_print"`
 	CustomFields map[string]string `json:"custom_fields"`
 }
 
@@ -62,7 +62,7 @@ type TextLogFormatter struct {
 func NewTextFormatter() IFormatter {
 	return &TextLogFormatter{
 		BaseFormatter: NewBaseFormatter(),
-		Template:     "${time} ${level} ${caller} ${message} ${fields}",
+		Template:      "${time} ${level} ${caller} ${message} ${fields}",
 	}
 }
 
@@ -74,13 +74,13 @@ func (f *TextLogFormatter) GetName() string {
 // Format 格式化日志条目
 func (f *TextLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 	var parts []string
-	
+
 	// 时间
 	if f.TimeFormat != "" {
-		timeStr := time.Unix(0, entry.Timestamp).Format(f.TimeFormat)
+		timeStr := time.Unix(entry.Timestamp, 0).Format(f.TimeFormat)
 		parts = append(parts, timeStr)
 	}
-	
+
 	// 级别
 	if f.ShowLevel {
 		levelStr := entry.Level.String()
@@ -89,23 +89,23 @@ func (f *TextLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 		} else {
 			levelStr = fmt.Sprintf("[%s]", levelStr)
 		}
-		
+
 		if f.Colorful {
 			levelStr = entry.Level.Color() + levelStr + "\033[0m"
 		}
-		
+
 		parts = append(parts, levelStr)
 	}
-	
+
 	// 调用者信息
 	if f.ShowCaller && entry.Caller != nil {
 		callerStr := fmt.Sprintf("[%s:%d:%s]", entry.Caller.File, entry.Caller.Line, entry.Caller.Function)
 		parts = append(parts, callerStr)
 	}
-	
+
 	// 消息
 	parts = append(parts, entry.Message)
-	
+
 	// 字段
 	if len(entry.Fields) > 0 {
 		var fieldParts []string
@@ -116,7 +116,7 @@ func (f *TextLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 			parts = append(parts, fmt.Sprintf("{%s}", strings.Join(fieldParts, ", ")))
 		}
 	}
-	
+
 	result := strings.Join(parts, " ") + "\n"
 	return []byte(result), nil
 }
@@ -149,12 +149,12 @@ func (f *JSONLogFormatter) GetName() string {
 // Format 格式化日志条目
 func (f *JSONLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 	data := make(map[string]interface{})
-	
+
 	// 基础字段
-	data[f.getFieldName("time")] = time.Unix(0, entry.Timestamp).Format(f.TimeFormat)
+	data[f.getFieldName("time")] = time.Unix(entry.Timestamp, 0).Format(f.TimeFormat)
 	data[f.getFieldName("level")] = entry.Level.String()
 	data[f.getFieldName("message")] = entry.Message
-	
+
 	// 调用者信息
 	if f.ShowCaller && entry.Caller != nil {
 		data[f.getFieldName("caller")] = map[string]interface{}{
@@ -163,7 +163,7 @@ func (f *JSONLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 			"function": entry.Caller.Function,
 		}
 	}
-	
+
 	// 自定义字段
 	if len(entry.Fields) > 0 {
 		if f.getFieldName("fields") == "fields" {
@@ -175,25 +175,25 @@ func (f *JSONLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 			}
 		}
 	}
-	
+
 	// 添加自定义字段
 	for key, value := range f.CustomFields {
 		data[key] = value
 	}
-	
+
 	var result []byte
 	var err error
-	
+
 	if f.PrettyPrint {
 		result, err = json.MarshalIndent(data, "", "  ")
 	} else {
 		result, err = json.Marshal(data)
 	}
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return append(result, '\n'), nil
 }
 
@@ -216,8 +216,8 @@ type XMLLogFormatter struct {
 func NewXMLFormatter() IFormatter {
 	return &XMLLogFormatter{
 		BaseFormatter: NewBaseFormatter(),
-		RootElement:  "log",
-		LogElement:   "entry",
+		RootElement:   "log",
+		LogElement:    "entry",
 	}
 }
 
@@ -229,23 +229,23 @@ func (f *XMLLogFormatter) GetName() string {
 // Format 格式化日志条目
 func (f *XMLLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 	var parts []string
-	
+
 	parts = append(parts, fmt.Sprintf("<%s>", f.LogElement))
-	
+
 	// 时间
 	if f.TimeFormat != "" {
-		timeStr := time.Unix(0, entry.Timestamp).Format(f.TimeFormat)
+		timeStr := time.Unix(entry.Timestamp, 0).Format(f.TimeFormat)
 		parts = append(parts, fmt.Sprintf("  <time>%s</time>", timeStr))
 	}
-	
+
 	// 级别
 	if f.ShowLevel {
 		parts = append(parts, fmt.Sprintf("  <level>%s</level>", entry.Level.String()))
 	}
-	
+
 	// 消息
 	parts = append(parts, fmt.Sprintf("  <message><![CDATA[%s]]></message>", entry.Message))
-	
+
 	// 调用者信息
 	if f.ShowCaller && entry.Caller != nil {
 		parts = append(parts, "  <caller>")
@@ -254,7 +254,7 @@ func (f *XMLLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 		parts = append(parts, fmt.Sprintf("    <function>%s</function>", entry.Caller.Function))
 		parts = append(parts, "  </caller>")
 	}
-	
+
 	// 字段
 	if len(entry.Fields) > 0 {
 		parts = append(parts, "  <fields>")
@@ -263,9 +263,9 @@ func (f *XMLLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 		}
 		parts = append(parts, "  </fields>")
 	}
-	
+
 	parts = append(parts, fmt.Sprintf("</%s>", f.LogElement))
-	
+
 	result := strings.Join(parts, "\n") + "\n"
 	return []byte(result), nil
 }
@@ -281,8 +281,8 @@ type CSVLogFormatter struct {
 func NewCSVFormatter() IFormatter {
 	return &CSVLogFormatter{
 		BaseFormatter: NewBaseFormatter(),
-		Headers:      []string{"time", "level", "message", "file", "line", "function"},
-		Delimiter:    ",",
+		Headers:       []string{"time", "level", "message", "file", "line", "function"},
+		Delimiter:     ",",
 	}
 }
 
@@ -294,11 +294,11 @@ func (f *CSVLogFormatter) GetName() string {
 // Format 格式化日志条目
 func (f *CSVLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 	var values []string
-	
+
 	for _, header := range f.Headers {
 		switch header {
 		case "time":
-			values = append(values, time.Unix(0, entry.Timestamp).Format(f.TimeFormat))
+			values = append(values, time.Unix(entry.Timestamp, 0).Format(f.TimeFormat))
 		case "level":
 			values = append(values, entry.Level.String())
 		case "message":
@@ -330,7 +330,7 @@ func (f *CSVLogFormatter) Format(entry *LogEntry) ([]byte, error) {
 			}
 		}
 	}
-	
+
 	result := strings.Join(values, f.Delimiter) + "\n"
 	return []byte(result), nil
 }
@@ -345,13 +345,13 @@ func NewFormatRegistry() *FormatRegistry {
 	registry := &FormatRegistry{
 		formatters: make(map[FormatterType]func() IFormatter),
 	}
-	
+
 	// 注册默认格式化器
 	registry.Register(TextFormatter, NewTextFormatter)
 	registry.Register(JSONFormatter, NewJSONFormatter)
 	registry.Register(XMLFormatter, NewXMLFormatter)
 	registry.Register(CSVFormatter, NewCSVFormatter)
-	
+
 	return registry
 }
 
@@ -384,7 +384,7 @@ func GetCallerInfo(skip int) *CallerInfo {
 	if !ok {
 		return nil
 	}
-	
+
 	funcName := runtime.FuncForPC(pc).Name()
 	if idx := strings.LastIndex(funcName, "."); idx != -1 {
 		funcName = funcName[idx+1:]
@@ -392,7 +392,7 @@ func GetCallerInfo(skip int) *CallerInfo {
 	if idx := strings.LastIndex(file, "/"); idx != -1 {
 		file = file[idx+1:]
 	}
-	
+
 	return &CallerInfo{
 		File:     file,
 		Line:     line,

@@ -3,21 +3,20 @@
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
  * @LastEditTime: 2025-11-09 13:27:49
- * @FilePath: \go-logger\metrics\memory_test.go
+ * @FilePath: \go-logger\metrics_memory_test.go
  * @Description: 内存监控模块测试套件
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 
-package metrics
+package logger
 
 import (
+	"github.com/stretchr/testify/suite"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/suite"
 )
 
 // MemoryMonitorTestSuite 内存监控测试套件
@@ -62,19 +61,19 @@ func (suite *MemoryMonitorTestSuite) TestStartStop() {
 	suite.NoError(err)
 	suite.True(suite.monitor.running)
 	suite.False(suite.monitor.startTime.IsZero())
-	
+
 	// 测试重复启动
 	err = suite.monitor.Start()
 	suite.NoError(err) // 重复启动不应该报错
-	
+
 	// 等待一小段时间让监控循环开始
 	time.Sleep(20 * time.Millisecond)
-	
+
 	// 测试停止
 	err = suite.monitor.Stop()
 	suite.NoError(err)
 	suite.False(suite.monitor.running)
-	
+
 	// 测试重复停止
 	err = suite.monitor.Stop()
 	suite.NoError(err) // 重复停止不应该报错
@@ -85,14 +84,14 @@ func (suite *MemoryMonitorTestSuite) TestMemoryInfoCollection() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待收集数据
 	time.Sleep(25 * time.Millisecond)
-	
+
 	// 获取内存信息
 	memInfo := suite.monitor.GetMemoryInfo()
 	suite.Require().NotNil(memInfo)
-	
+
 	// 验证基本字段
 	suite.False(memInfo.Timestamp.IsZero())
 	suite.True(memInfo.TotalMemory > 0)
@@ -110,15 +109,15 @@ func (suite *MemoryMonitorTestSuite) TestGCInfoCollection() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 强制触发GC以生成数据
 	runtime.GC()
 	time.Sleep(25 * time.Millisecond)
-	
+
 	// 获取GC信息
 	gcInfo := suite.monitor.GetGCInfo()
 	suite.Require().NotNil(gcInfo)
-	
+
 	// 验证基本字段
 	suite.False(gcInfo.Timestamp.IsZero())
 	suite.True(gcInfo.GCCPUFraction >= 0)
@@ -131,14 +130,14 @@ func (suite *MemoryMonitorTestSuite) TestHeapInfoCollection() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待收集数据
 	time.Sleep(25 * time.Millisecond)
-	
+
 	// 获取堆信息
 	heapInfo := suite.monitor.GetHeapInfo()
 	suite.Require().NotNil(heapInfo)
-	
+
 	// 验证基本字段
 	suite.False(heapInfo.Timestamp.IsZero())
 	suite.True(heapInfo.HeapAlloc > 0)
@@ -153,14 +152,14 @@ func (suite *MemoryMonitorTestSuite) TestMemoryStats() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待收集数据
 	time.Sleep(35 * time.Millisecond)
-	
+
 	// 获取内存统计
 	stats := suite.monitor.GetMemoryStats()
 	suite.Require().NotNil(stats)
-	
+
 	// 验证统计数据
 	suite.True(stats.Used > 0)
 	suite.True(stats.Total > 0)
@@ -178,15 +177,15 @@ func (suite *MemoryMonitorTestSuite) TestForceGC() {
 	var beforeGC runtime.MemStats
 	runtime.ReadMemStats(&beforeGC)
 	initialGC := beforeGC.NumGC
-	
+
 	// 执行强制GC
 	suite.monitor.ForceGC()
-	
+
 	// 获取GC后的计数
 	var afterGC runtime.MemStats
 	runtime.ReadMemStats(&afterGC)
 	finalGC := afterGC.NumGC
-	
+
 	// 验证GC被触发
 	suite.True(finalGC > initialGC)
 }
@@ -197,7 +196,7 @@ func (suite *MemoryMonitorTestSuite) TestGCPercentConfiguration() {
 	oldPercent := suite.monitor.SetGCPercent(50)
 	suite.Equal(100, oldPercent) // 默认值
 	suite.Equal(50, suite.monitor.gcPercent)
-	
+
 	// 再次设置
 	oldPercent = suite.monitor.SetGCPercent(200)
 	suite.Equal(50, oldPercent)
@@ -209,9 +208,9 @@ func (suite *MemoryMonitorTestSuite) TestMaxMemoryConfiguration() {
 	// 启动监控以生成内存历史
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	time.Sleep(15 * time.Millisecond)
-	
+
 	// 设置最大内存
 	maxMemory := uint64(1024 * 1024 * 1024) // 1GB
 	suite.monitor.SetMaxMemory(maxMemory)
@@ -235,18 +234,18 @@ func (suite *MemoryMonitorTestSuite) TestThresholdCallback() {
 		callbackCalled = true
 		callbackInfo = info
 	}
-	
+
 	suite.monitor.OnMemoryThresholdExceeded(callback)
 	suite.NotNil(suite.monitor.thresholdCallback)
-	
+
 	// 模拟阈值超出
 	suite.monitor.threshold = 1.0 // 设置很低的阈值
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待回调被触发
 	time.Sleep(35 * time.Millisecond)
-	
+
 	if callbackCalled {
 		suite.True(callbackCalled)
 		suite.NotNil(callbackInfo)
@@ -260,7 +259,7 @@ func (suite *MemoryMonitorTestSuite) TestHeapSnapshot() {
 	snapshot, err := suite.monitor.TakeHeapSnapshot()
 	suite.Require().NoError(err)
 	suite.Require().NotNil(snapshot)
-	
+
 	// 验证快照数据
 	suite.False(snapshot.Timestamp.IsZero())
 	suite.True(snapshot.TotalSize > 0)
@@ -268,7 +267,7 @@ func (suite *MemoryMonitorTestSuite) TestHeapSnapshot() {
 	suite.NotNil(snapshot.TypeStats)
 	suite.NotNil(snapshot.SizeHistogram)
 	suite.NotNil(snapshot.AgeHistogram)
-	
+
 	// 验证快照被添加到列表
 	suite.Len(suite.monitor.snapshots, 1)
 	suite.Equal(snapshot, suite.monitor.snapshots[0])
@@ -277,13 +276,13 @@ func (suite *MemoryMonitorTestSuite) TestHeapSnapshot() {
 // TestSnapshotLimit 测试多次堆快照限制
 func (suite *MemoryMonitorTestSuite) TestSnapshotLimit() {
 	suite.monitor.maxSnapshots = 3 // 设置最大快照数量
-	
+
 	// 创建多个快照
 	for i := 0; i < 5; i++ {
 		_, err := suite.monitor.TakeHeapSnapshot()
 		suite.Require().NoError(err)
 	}
-	
+
 	// 验证快照数量限制
 	suite.Len(suite.monitor.snapshots, 3)
 }
@@ -293,14 +292,14 @@ func (suite *MemoryMonitorTestSuite) TestMemoryLeakAnalysis() {
 	// 启动监控以生成历史数据
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待收集数据
 	time.Sleep(35 * time.Millisecond)
-	
+
 	// 分析内存泄漏
 	report := suite.monitor.AnalyzeMemoryLeaks()
 	suite.Require().NotNil(report)
-	
+
 	// 验证报告内容
 	suite.False(report.Timestamp.IsZero())
 	suite.NotNil(report.SuspiciousTypes)
@@ -315,7 +314,7 @@ func (suite *MemoryMonitorTestSuite) TestMemoryLeakAnalysisInsufficientData() {
 	// 不启动监控，保持历史数据为空
 	report := suite.monitor.AnalyzeMemoryLeaks()
 	suite.Require().NotNil(report)
-	
+
 	// 验证数据不足时的报告
 	suite.Equal("stable", report.GrowthTrend)
 	suite.Contains(report.RecommendedActions[0], "需要更多数据来分析内存泄漏")
@@ -327,23 +326,23 @@ func (suite *MemoryMonitorTestSuite) TestCleanup() {
 	// 启动监控生成数据
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待生成数据
 	time.Sleep(35 * time.Millisecond)
-	
+
 	// 创建快照
 	_, err = suite.monitor.TakeHeapSnapshot()
 	suite.Require().NoError(err)
-	
+
 	// 验证有数据
 	suite.NotEmpty(suite.monitor.memoryHistory)
 	suite.NotEmpty(suite.monitor.gcHistory)
 	suite.NotEmpty(suite.monitor.heapHistory)
 	suite.NotEmpty(suite.monitor.snapshots)
-	
+
 	// 执行清理
 	suite.monitor.Cleanup()
-	
+
 	// 验证数据被清理
 	suite.Empty(suite.monitor.memoryHistory)
 	suite.Empty(suite.monitor.gcHistory)
@@ -355,17 +354,17 @@ func (suite *MemoryMonitorTestSuite) TestCleanup() {
 // TestOptimize 测试优化功能
 func (suite *MemoryMonitorTestSuite) TestOptimize() {
 	suite.monitor.enableGCTuning = true
-	
+
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待生成数据
 	time.Sleep(15 * time.Millisecond)
-	
+
 	// 执行优化
 	suite.monitor.Optimize()
-	
+
 	// 验证没有错误（优化是内部操作，主要验证不崩溃）
 	suite.True(true) // 如果程序没有崩溃，测试通过
 }
@@ -377,14 +376,14 @@ func (suite *MemoryMonitorTestSuite) TestStringRepresentation() {
 	suite.Contains(str, "Status: stopped")
 	suite.Contains(str, "Threshold: 80.0%")
 	suite.Contains(str, "HistorySize: 0")
-	
+
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待生成数据
 	time.Sleep(15 * time.Millisecond)
-	
+
 	// 测试运行状态
 	str = suite.monitor.String()
 	suite.Contains(str, "Status: running")
@@ -394,21 +393,21 @@ func (suite *MemoryMonitorTestSuite) TestStringRepresentation() {
 // TestHistoryLimit 测试历史数据限制
 func (suite *MemoryMonitorTestSuite) TestHistoryLimit() {
 	suite.monitor.maxHistorySize = 5 // 设置小的历史大小
-	
+
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待生成足够的历史数据
 	time.Sleep(60 * time.Millisecond)
-	
+
 	// 验证历史数据限制（使用锁来安全访问）
 	suite.monitor.mu.RLock()
 	memHistLen := len(suite.monitor.memoryHistory)
 	gcHistLen := len(suite.monitor.gcHistory)
 	heapHistLen := len(suite.monitor.heapHistory)
 	suite.monitor.mu.RUnlock()
-	
+
 	suite.True(memHistLen <= 5)
 	suite.True(gcHistLen <= 5)
 	suite.True(heapHistLen <= 5)
@@ -419,9 +418,9 @@ func (suite *MemoryMonitorTestSuite) TestConcurrencySafety() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	var wg sync.WaitGroup
-	
+
 	// 并发读取
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -433,7 +432,7 @@ func (suite *MemoryMonitorTestSuite) TestConcurrencySafety() {
 			suite.monitor.GetMemoryStats()
 		}()
 	}
-	
+
 	// 并发写入
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
@@ -444,9 +443,9 @@ func (suite *MemoryMonitorTestSuite) TestConcurrencySafety() {
 			suite.monitor.TakeHeapSnapshot()
 		}()
 	}
-	
+
 	wg.Wait()
-	
+
 	// 如果没有竞态条件，测试通过
 	suite.True(true)
 }
@@ -457,28 +456,28 @@ func (suite *MemoryMonitorTestSuite) TestHelperFunctions() {
 	suite.Equal(3, min(3, 5))
 	suite.Equal(2, min(7, 2))
 	suite.Equal(0, min(0, 0))
-	
+
 	// 测试 calculateSeverity
 	severity := suite.monitor.calculateSeverity(0, 0)
 	suite.Equal(0, severity)
-	
+
 	// 修正测试期望值
 	severity = suite.monitor.calculateSeverity(1024*1024, 1000)
 	suite.Equal(0, severity) // 1MB/s + 1000 objects/s = 0分 (都不超过阈值)
-	
+
 	severity = suite.monitor.calculateSeverity(10*1024*1024, 10000)
 	suite.Equal(2, severity) // 10MB/s(2分) + 10k objects/s(0分) = 2分
-	
+
 	// 测试 calculateTrendQuality
 	quality := suite.monitor.calculateTrendQuality(0.9, 2*1024*1024)
 	suite.Equal("concerning", quality)
-	
+
 	quality = suite.monitor.calculateTrendQuality(0.7, 600*1024)
 	suite.Equal("moderate", quality)
-	
+
 	quality = suite.monitor.calculateTrendQuality(0.5, 100)
 	suite.Equal("weak", quality)
-	
+
 	quality = suite.monitor.calculateTrendQuality(0.3, 100)
 	suite.Equal("stable", quality)
 }
@@ -487,13 +486,13 @@ func (suite *MemoryMonitorTestSuite) TestHelperFunctions() {
 func (suite *MemoryMonitorTestSuite) TestRiskScoreCalculation() {
 	// 测试不同风险级别的组合
 	tests := []struct {
-		name         string
-		leak         *leakAnalysis
-		trend        *trendAnalysis
-		heap         *heapAnalysis
-		gc           *gcAnalysis
-		minScore     float64
-		maxScore     float64
+		name     string
+		leak     *leakAnalysis
+		trend    *trendAnalysis
+		heap     *heapAnalysis
+		gc       *gcAnalysis
+		minScore float64
+		maxScore float64
 	}{
 		{
 			name:     "no risk",
@@ -514,7 +513,7 @@ func (suite *MemoryMonitorTestSuite) TestRiskScoreCalculation() {
 			maxScore: 1.0,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		suite.Run(tt.name, func() {
 			score := suite.monitor.calculateRiskScore(tt.leak, tt.trend, tt.heap, tt.gc)
@@ -535,11 +534,11 @@ func (suite *MemoryMonitorTestSuite) TestMemoryLeakAnalysisScenarios() {
 		{Timestamp: time.Now().Add(-2 * time.Second), UsedMemory: 1000300},
 		{Timestamp: time.Now().Add(-1 * time.Second), UsedMemory: 1000400},
 	}
-	
+
 	report := suite.monitor.AnalyzeMemoryLeaks()
 	suite.Equal("stable", report.GrowthTrend)
 	suite.Contains(report.RecommendedActions[0], "内存使用稳定")
-	
+
 	// 场景2：模拟内存泄漏
 	suite.monitor.memoryHistory = []MemoryInfo{
 		{Timestamp: time.Now().Add(-5 * time.Second), UsedMemory: 1000000},
@@ -548,7 +547,7 @@ func (suite *MemoryMonitorTestSuite) TestMemoryLeakAnalysisScenarios() {
 		{Timestamp: time.Now().Add(-2 * time.Second), UsedMemory: 30000000},
 		{Timestamp: time.Now().Add(-1 * time.Second), UsedMemory: 40000000},
 	}
-	
+
 	report = suite.monitor.AnalyzeMemoryLeaks()
 	suite.Equal("leaking", report.GrowthTrend)
 	suite.True(report.MemoryGrowthRate > 1024*1024) // 超过1MB/s
@@ -560,10 +559,10 @@ func (suite *MemoryMonitorTestSuite) TestEmergencyOptimization() {
 	// 启动监控
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 生成一些历史数据
 	time.Sleep(25 * time.Millisecond)
-	
+
 	// 添加大量历史数据以测试清理
 	for i := 0; i < 50; i++ {
 		suite.monitor.mu.Lock()
@@ -572,15 +571,15 @@ func (suite *MemoryMonitorTestSuite) TestEmergencyOptimization() {
 		suite.monitor.heapHistory = append(suite.monitor.heapHistory, HeapInfo{})
 		suite.monitor.mu.Unlock()
 	}
-	
+
 	// 添加快照
 	for i := 0; i < 10; i++ {
 		suite.monitor.TakeHeapSnapshot()
 	}
-	
+
 	// 执行紧急优化
 	suite.monitor.emergencyOptimization()
-	
+
 	// 验证数据被清理
 	suite.monitor.mu.Lock()
 	suite.LessOrEqual(len(suite.monitor.memoryHistory), 20)
@@ -599,7 +598,7 @@ func TestMemoryMonitorSuite(t *testing.T) {
 func (suite *MemoryMonitorTestSuite) TestMemoryInfoFieldsDetailed() {
 	// 直接测试收集方法
 	memInfo := suite.monitor.collectMemoryInfo()
-	
+
 	// 验证所有字段都有有效值
 	suite.False(memInfo.Timestamp.IsZero())
 	suite.True(memInfo.TotalMemory > 0)
@@ -620,10 +619,10 @@ func (suite *MemoryMonitorTestSuite) TestMemoryInfoFieldsDetailed() {
 func (suite *MemoryMonitorTestSuite) TestGCInfoFieldsDetailed() {
 	// 触发GC以生成数据
 	runtime.GC()
-	
+
 	// 直接测试收集方法
 	gcInfo := suite.monitor.collectGCInfo()
-	
+
 	// 验证字段
 	suite.False(gcInfo.Timestamp.IsZero())
 	suite.True(gcInfo.GCCPUFraction >= 0)
@@ -637,16 +636,16 @@ func (suite *MemoryMonitorTestSuite) TestGCInfoFieldsDetailed() {
 func (suite *MemoryMonitorTestSuite) TestMemoryLeakOptimizedDetection() {
 	suite.monitor.leakDetectionEnabled = true
 	suite.monitor.sampleInterval = 50 * time.Millisecond
-	
+
 	err := suite.monitor.Start()
 	suite.Require().NoError(err)
-	
+
 	// 等待基准快照创建和一些历史数据
 	time.Sleep(150 * time.Millisecond)
-	
+
 	// 停止监控避免并发问题
 	suite.monitor.Stop()
-	
+
 	// 验证没有崩溃
 	suite.True(true)
 }
@@ -660,14 +659,14 @@ func (suite *MemoryMonitorTestSuite) TestAnalyzeSnapshotComparison() {
 		ObjectCount: 5000,
 	}
 	suite.monitor.baselineSnapshot = baseSnapshot
-	
+
 	// 创建当前快照
 	currentSnapshot := &HeapSnapshot{
 		Timestamp:   time.Now(),
 		TotalSize:   2000000,
 		ObjectCount: 8000,
 	}
-	
+
 	// 测试分析方法
 	analysis := suite.monitor.analyzeSnapshotComparison(currentSnapshot)
 	suite.NotNil(analysis)
@@ -686,7 +685,7 @@ func (suite *MemoryMonitorTestSuite) TestAnalyzeMemoryTrends() {
 			UsedMemory: uint64(1000000 + i*100000), // 线性增长
 		})
 	}
-	
+
 	// 测试趋势分析
 	analysis := suite.monitor.analyzeMemoryTrends()
 	suite.NotNil(analysis)
@@ -710,7 +709,7 @@ func (suite *MemoryMonitorTestSuite) TestAnalyzeHeapGrowth() {
 			HeapFragmentation: float64(10 + i*2),
 		})
 	}
-	
+
 	// 测试堆分析
 	analysis := suite.monitor.analyzeHeapGrowth()
 	suite.NotNil(analysis)
@@ -733,7 +732,7 @@ func (suite *MemoryMonitorTestSuite) TestAnalyzeGCEfficiency() {
 			GCCPUFraction: float64(0.1 + float64(i)*0.05),
 		})
 	}
-	
+
 	// 测试GC效率分析
 	analysis := suite.monitor.analyzeGCEfficiency()
 	suite.NotNil(analysis)
@@ -750,10 +749,10 @@ func (suite *MemoryMonitorTestSuite) TestEvaluateAndAlert() {
 	trend := &trendAnalysis{TrendQuality: "moderate"}
 	heap := &heapAnalysis{ObjectGrowthRate: 500}
 	gc := &gcAnalysis{CPUFraction: 0.15}
-	
+
 	// 测试评估方法
 	suite.monitor.evaluateAndAlert(leak, trend, heap, gc)
-	
+
 	// 这个方法主要是内部处理，验证没有崩溃即可
 	suite.True(true)
 }
@@ -766,17 +765,17 @@ func (suite *MemoryMonitorTestSuite) TestUpdateBaselineIfNeeded() {
 		TotalSize: 1000000,
 	}
 	suite.monitor.baselineSnapshot = oldBaseline
-	
+
 	current := &HeapSnapshot{
 		Timestamp: time.Now(),
 		TotalSize: 1100000,
 	}
-	
+
 	// 测试不同情况下的基准更新
 	leak := &leakAnalysis{SeverityLevel: 4} // 高风险
 	suite.monitor.updateBaselineIfNeeded(current, leak)
 	suite.Equal(current, suite.monitor.baselineSnapshot) // 应该更新基准
-	
+
 	// 测试基准快照过期的情况
 	veryOldBaseline := &HeapSnapshot{
 		Timestamp: time.Now().Add(-2 * time.Hour),
@@ -806,22 +805,22 @@ func (suite *MemoryMonitorTestSuite) TestTriggerAlerts() {
 	gc := &gcAnalysis{
 		CPUFraction: 0.3,
 	}
-	
+
 	// 测试高风险告警
 	suite.monitor.triggerHighRiskAlert(leak, trend, heap, gc)
-	
+
 	// 测试中等风险告警
 	leak.SeverityLevel = 2
 	leak.SizeGrowthRate = 1024 * 1024 // 1MB/s
 	trend.TrendQuality = "moderate"
 	suite.monitor.triggerMediumRiskAlert(leak, trend, heap, gc)
-	
+
 	// 测试低风险告警
 	leak.SeverityLevel = 1
 	leak.SizeGrowthRate = 1024 // 1KB/s
 	trend.TrendQuality = "weak"
 	suite.monitor.triggerLowRiskAlert(leak, trend, heap, gc)
-	
+
 	// 验证没有崩溃
 	suite.True(true)
 }
@@ -829,18 +828,18 @@ func (suite *MemoryMonitorTestSuite) TestTriggerAlerts() {
 // TestHistoryDataManagement 测试历史数据管理
 func (suite *MemoryMonitorTestSuite) TestHistoryDataManagement() {
 	suite.monitor.maxHistorySize = 3 // 设置小的历史大小用于测试
-	
+
 	// 模拟添加历史数据
 	for i := 0; i < 5; i++ {
 		memInfo := MemoryInfo{Timestamp: time.Now()}
 		gcInfo := GCInfo{Timestamp: time.Now()}
 		heapInfo := HeapInfo{Timestamp: time.Now()}
-		
+
 		suite.monitor.mu.Lock()
 		suite.monitor.addToHistory(memInfo, gcInfo, heapInfo)
 		suite.monitor.mu.Unlock()
 	}
-	
+
 	// 验证历史大小限制
 	suite.Equal(3, len(suite.monitor.memoryHistory))
 	suite.Equal(3, len(suite.monitor.gcHistory))
@@ -851,61 +850,61 @@ func (suite *MemoryMonitorTestSuite) TestHistoryDataManagement() {
 func (suite *MemoryMonitorTestSuite) TestAdvancedRiskScoreCalculation() {
 	// 测试所有风险级别的详细场景
 	testCases := []struct {
-		name         string
-		leak         *leakAnalysis
-		trend        *trendAnalysis
-		heap         *heapAnalysis
-		gc           *gcAnalysis
-		expectedMin  float64
-		expectedMax  float64
+		name        string
+		leak        *leakAnalysis
+		trend       *trendAnalysis
+		heap        *heapAnalysis
+		gc          *gcAnalysis
+		expectedMin float64
+		expectedMax float64
 	}{
 		{
-			name:     "zero risk",
-			leak:     &leakAnalysis{SeverityLevel: 0},
-			trend:    &trendAnalysis{TrendQuality: "stable"},
-			heap:     &heapAnalysis{ObjectGrowthRate: 0},
-			gc:       &gcAnalysis{CPUFraction: 0.01},
+			name:        "zero risk",
+			leak:        &leakAnalysis{SeverityLevel: 0},
+			trend:       &trendAnalysis{TrendQuality: "stable"},
+			heap:        &heapAnalysis{ObjectGrowthRate: 0},
+			gc:          &gcAnalysis{CPUFraction: 0.01},
 			expectedMin: 0.0,
 			expectedMax: 0.05,
 		},
 		{
-			name:     "low risk",
-			leak:     &leakAnalysis{SeverityLevel: 1},
-			trend:    &trendAnalysis{TrendQuality: "weak"},
-			heap:     &heapAnalysis{ObjectGrowthRate: 50},
-			gc:       &gcAnalysis{CPUFraction: 0.05},
+			name:        "low risk",
+			leak:        &leakAnalysis{SeverityLevel: 1},
+			trend:       &trendAnalysis{TrendQuality: "weak"},
+			heap:        &heapAnalysis{ObjectGrowthRate: 50},
+			gc:          &gcAnalysis{CPUFraction: 0.05},
 			expectedMin: 0.1,
 			expectedMax: 0.25,
 		},
 		{
-			name:     "medium risk",
-			leak:     &leakAnalysis{SeverityLevel: 2},
-			trend:    &trendAnalysis{TrendQuality: "moderate"},
-			heap:     &heapAnalysis{ObjectGrowthRate: 500},
-			gc:       &gcAnalysis{CPUFraction: 0.15},
+			name:        "medium risk",
+			leak:        &leakAnalysis{SeverityLevel: 2},
+			trend:       &trendAnalysis{TrendQuality: "moderate"},
+			heap:        &heapAnalysis{ObjectGrowthRate: 500},
+			gc:          &gcAnalysis{CPUFraction: 0.15},
 			expectedMin: 0.25,
 			expectedMax: 0.55,
 		},
 		{
-			name:     "high risk",
-			leak:     &leakAnalysis{SeverityLevel: 3},
-			trend:    &trendAnalysis{TrendQuality: "concerning"},
-			heap:     &heapAnalysis{ObjectGrowthRate: 1500},
-			gc:       &gcAnalysis{CPUFraction: 0.25},
+			name:        "high risk",
+			leak:        &leakAnalysis{SeverityLevel: 3},
+			trend:       &trendAnalysis{TrendQuality: "concerning"},
+			heap:        &heapAnalysis{ObjectGrowthRate: 1500},
+			gc:          &gcAnalysis{CPUFraction: 0.25},
 			expectedMin: 0.65,
 			expectedMax: 0.95,
 		},
 		{
-			name:     "critical risk",
-			leak:     &leakAnalysis{SeverityLevel: 4},
-			trend:    &trendAnalysis{TrendQuality: "concerning"},
-			heap:     &heapAnalysis{ObjectGrowthRate: 2000},
-			gc:       &gcAnalysis{CPUFraction: 0.3},
+			name:        "critical risk",
+			leak:        &leakAnalysis{SeverityLevel: 4},
+			trend:       &trendAnalysis{TrendQuality: "concerning"},
+			heap:        &heapAnalysis{ObjectGrowthRate: 2000},
+			gc:          &gcAnalysis{CPUFraction: 0.3},
 			expectedMin: 0.8,
 			expectedMax: 1.0,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		suite.Run(tc.name, func() {
 			score := suite.monitor.calculateRiskScore(tc.leak, tc.trend, tc.heap, tc.gc)
@@ -920,22 +919,22 @@ func (suite *MemoryMonitorTestSuite) TestAdvancedRiskScoreCalculation() {
 func (suite *MemoryMonitorTestSuite) TestBenchmarkMemoryInfo() {
 	// 这不是真正的基准测试，而是在套件中模拟基准测试的行为
 	start := time.Now()
-	
+
 	for i := 0; i < 100; i++ {
 		suite.monitor.GetMemoryInfo()
 	}
-	
+
 	duration := time.Since(start)
 	suite.True(duration < time.Second) // 验证性能在可接受范围内
 }
 
 func (suite *MemoryMonitorTestSuite) TestBenchmarkHeapSnapshot() {
 	start := time.Now()
-	
+
 	for i := 0; i < 10; i++ {
 		suite.monitor.TakeHeapSnapshot()
 	}
-	
+
 	duration := time.Since(start)
 	suite.True(duration < time.Second*5) // 验证性能在可接受范围内
 }

@@ -12,11 +12,10 @@
 package logger
 
 import (
-	"strings"
-	"testing"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"strings"
+	"testing"
 )
 
 // LevelTestSuite 日志级别测试套件
@@ -52,10 +51,10 @@ func (suite *LevelTestSuite) TestLogLevelString() {
 	expected := "UNKNOWN(999)"
 	assert.Equal(suite.T(), expected, invalidLevel.String())
 
-	// 测试负数级别
-	negativeLevel := LogLevel(-1)
-	expected = "UNKNOWN(-1)"
-	assert.Equal(suite.T(), expected, negativeLevel.String())
+	// 测试 TRACE 级别 (-1)
+	traceLevel := LogLevel(-1)
+	expected = "TRACE"
+	assert.Equal(suite.T(), expected, traceLevel.String())
 }
 
 // TestLogLevelEmoji 测试级别表情符号
@@ -321,23 +320,21 @@ func (suite *LevelTestSuite) TestParseLevelCaseInsensitive() {
 func (suite *LevelTestSuite) TestLevelConfig() {
 	// 验证级别配置映射是完整的
 	expectedLevels := []LogLevel{DEBUG, INFO, WARN, ERROR, FATAL}
-	
+
 	for _, level := range expectedLevels {
 		// 每个级别都应该有配置
-		info, exists := levelConfig[level]
-		assert.True(suite.T(), exists,
-			"Level %v should have configuration", level)
+		info := level.Info()
+		assert.NotEmpty(suite.T(), info.Name,
+			"Level %v should have name", level)
 
 		// 验证配置字段不为空
-		assert.NotEmpty(suite.T(), info.emoji,
+		assert.NotEmpty(suite.T(), info.Emoji,
 			"Level %v should have emoji", level)
-		assert.NotEmpty(suite.T(), info.name,
-			"Level %v should have name", level)
-		assert.NotEmpty(suite.T(), info.color,
+		assert.NotEmpty(suite.T(), info.Color,
 			"Level %v should have color", level)
 
 		// 验证名称与String()方法一致
-		assert.Equal(suite.T(), info.name, level.String(),
+		assert.Equal(suite.T(), info.Name, level.String(),
 			"Config name should match String() for level %v", level)
 	}
 }

@@ -1,356 +1,381 @@
 /*
  * @Author: kamalyes 501893067@qq.com
- * @Date: 2025-11-09 18:30:00
+ * @Date: 2025-11-08 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 18:30:00
+ * @LastEditTime: 2025-11-22 13:10:00
  * @FilePath: \go-logger\examples\context\main.go
- * @Description: 上下文感知日志示例，演示如何在微服务中使用上下文进行分布式追踪
+ * @Description: 上下文示例 - 演示上下文相关的日志功能
  *
- * Copyright (c) 2025 by kamalyes, All Rights Reserved.
+ * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
+
 package main
 
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"net/http"
-	"time"
-
 	"github.com/kamalyes/go-logger"
+	"math/rand"
+	"os"
+	"strings"
+	"sync"
+	"time"
 )
 
-// 模拟的微服务组件
-type UserService struct {
-	logger logger.ILogger
-}
-
-type OrderService struct {
-	logger     logger.ILogger
-	userSvc    *UserService
-	paymentSvc *PaymentService
-}
-
-type PaymentService struct {
-	logger logger.ILogger
-}
-
-// 模拟的请求和响应结构
-type CreateOrderRequest struct {
-	UserID    int     `json:"user_id"`
-	ProductID int     `json:"product_id"`
-	Amount    float64 `json:"amount"`
-}
-
-type CreateOrderResponse struct {
-	OrderID   string `json:"order_id"`
-	Status    string `json:"status"`
-	Message   string `json:"message"`
-}
-
 func main() {
-		fmt.Println("=== 微服务分布式追踪演示结束 ===")
+	fmt.Println("🎯 Go Logger - 上下文示例演示")
+	fmt.Println(strings.Repeat("=", 50))
 
-	// 创建日志器
-	config := logger.DefaultConfig().
-		WithLevel(logger.DEBUG).
-		WithShowCaller(true).
-		WithColorful(true).
-		WithPrefix("[Context-Demo] ")
+	// 1. 基础上下文日志
+	demonstrateBasicContext()
 
-	baseLogger := logger.NewLogger(config)
+	fmt.Println()
 
-	// 创建服务实例
-	userSvc := &UserService{logger: baseLogger.WithField("service", "user")}
-	paymentSvc := &PaymentService{logger: baseLogger.WithField("service", "payment")}
-	orderSvc := &OrderService{
-		logger:     baseLogger.WithField("service", "order"),
-		userSvc:    userSvc,
-		paymentSvc: paymentSvc,
-	}
+	// 2. 上下文传递演示
+	demonstrateContextPropagation()
 
-	// 模拟多个并发请求
-	fmt.Println("1. === 模拟HTTP请求处理 ===")
-	simulateHTTPRequests(orderSvc)
+	fmt.Println()
 
-	// 模拟长时间运行的任务
-	fmt.Println("\n2. === 模拟后台任务处理 ===")
-	simulateBackgroundTask(baseLogger)
+	// 3. 上下文取消演示
+	demonstrateContextCancellation()
 
-	// 演示错误传播和追踪
-	fmt.Println("\n3. === 模拟错误传播追踪 ===")
-	simulateErrorPropagation(orderSvc)
+	fmt.Println()
 
-	fmt.Println("\n=== 上下文演示完成 ===")
+	// 4. 上下文超时演示
+	demonstrateContextTimeout()
+
+	fmt.Println()
+
+	// 5. 上下文值传递
+	demonstrateContextValues()
+
+	fmt.Println()
+
+	// 6. 实际应用场景
+	demonstrateRealWorldScenarios()
 }
 
-// simulateHTTPRequests 模拟HTTP请求处理
-func simulateHTTPRequests(orderSvc *OrderService) {
-	requests := []CreateOrderRequest{
-		{UserID: 1001, ProductID: 2001, Amount: 99.99},
-		{UserID: 1002, ProductID: 2002, Amount: 149.99},
-		{UserID: 1003, ProductID: 2003, Amount: 299.99},
-	}
+// 基础上下文日志
+func demonstrateBasicContext() {
+	fmt.Println("📝 1. 基础上下文日志")
+	fmt.Println(strings.Repeat("-", 30))
 
-	for i, req := range requests {
-		// 为每个请求创建独立的上下文
-		ctx := createRequestContext(fmt.Sprintf("req-%d", i+1), fmt.Sprintf("user-%d", req.UserID))
-		
-		// 处理请求
-		response := orderSvc.CreateOrder(ctx, req)
-		
-		fmt.Printf("请求处理结果: %+v\n", response)
-		
-		// 模拟请求间隔
-		time.Sleep(time.Millisecond * 100)
-	}
-}
+	// 创建适配器
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.DEBUG,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+		Colorful:   true,
+	})
+	adapter.Initialize()
 
-// simulateBackgroundTask 模拟后台任务
-func simulateBackgroundTask(baseLogger logger.ILogger) {
-	taskID := "task-cleanup-001"
+	// 创建上下文
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "task_id", taskID)
-	ctx = context.WithValue(ctx, "task_type", "cleanup")
-	
-	// 创建任务专用的日志器
-	taskLogger := baseLogger.WithContext(ctx).WithField("component", "background-task")
-	
-	taskLogger.InfoKV("后台任务开始",
-		"task_id", taskID,
-		"task_type", "cleanup",
-		"scheduled_time", time.Now().Format(time.RFC3339),
-	)
-	
-	// 模拟任务处理步骤
-	steps := []string{"扫描过期数据", "备份重要数据", "删除过期记录", "更新统计信息", "清理临时文件"}
-	
-	for i, step := range steps {
-		stepCtx := context.WithValue(ctx, "step", i+1)
-		stepLogger := taskLogger.WithContext(stepCtx)
-		
-		stepLogger.DebugKV("执行清理步骤",
-			"step_number", i+1,
-			"step_name", step,
-			"total_steps", len(steps),
-		)
-		
-		// 模拟处理时间
-		processingTime := time.Duration(rand.Intn(200)+50) * time.Millisecond
-		time.Sleep(processingTime)
-		
-		stepLogger.InfoKV("清理步骤完成",
-			"step_number", i+1,
-			"step_name", step,
-			"duration_ms", processingTime.Milliseconds(),
-		)
-	}
-	
-	taskLogger.InfoMsg("后台任务完成")
+
+	fmt.Println("\n🔹 基础上下文方法:")
+	adapter.DebugContext(ctx, "这是带上下文的调试信息")
+	adapter.InfoContext(ctx, "这是带上下文的普通信息")
+	adapter.WarnContext(ctx, "这是带上下文的警告信息")
+	adapter.ErrorContext(ctx, "这是带上下文的错误信息")
+
+	fmt.Println("\n🔹 带上下文的格式化日志:")
+	adapter.DebugContext(ctx, "用户 %d 执行了 %s 操作", 12345, "登录")
+	adapter.InfoContext(ctx, "处理请求耗时 %v", 150*time.Millisecond)
+
+	// 与非上下文方法对比
+	fmt.Println("\n🔹 对比非上下文方法:")
+	adapter.Info("普通日志方法")
+	adapter.InfoContext(ctx, "上下文日志方法")
+
+	defer adapter.Close()
 }
 
-// simulateErrorPropagation 模拟错误传播和追踪
-func simulateErrorPropagation(orderSvc *OrderService) {
-	// 创建一个会导致错误的请求
-	ctx := createRequestContext("req-error-001", "user-9999")
-	
-	req := CreateOrderRequest{
-		UserID:    9999, // 不存在的用户
-		ProductID: 2001,
-		Amount:    99.99,
-	}
-	
-	response := orderSvc.CreateOrder(ctx, req)
-	fmt.Printf("错误请求处理结果: %+v\n", response)
+// 上下文传递演示
+func demonstrateContextPropagation() {
+	fmt.Println("🔄 2. 上下文传递演示")
+	fmt.Println(strings.Repeat("-", 30))
+
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.INFO,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+	})
+	adapter.Initialize()
+
+	// 创建带值的上下文
+	ctx := context.WithValue(context.Background(), "requestID", "req-12345")
+	ctx = context.WithValue(ctx, "userID", "user-67890")
+
+	fmt.Println("\n🔹 模拟请求处理链:")
+
+	// 模拟HTTP处理器
+	handleRequest(ctx, adapter)
+
+	defer adapter.Close()
 }
 
-// createRequestContext 创建请求上下文
-func createRequestContext(requestID, userID string) context.Context {
-	ctx := context.Background()
-	
-	// 添加分布式追踪信息
-	traceID := fmt.Sprintf("trace-%d", time.Now().UnixNano())
-	spanID := fmt.Sprintf("span-%d", time.Now().UnixNano()%1000000)
-	
-	ctx = context.WithValue(ctx, "request_id", requestID)
-	ctx = context.WithValue(ctx, "user_id", userID)
-	ctx = context.WithValue(ctx, "trace_id", traceID)
-	ctx = context.WithValue(ctx, "span_id", spanID)
-	ctx = context.WithValue(ctx, "start_time", time.Now())
-	ctx = context.WithValue(ctx, "source_ip", "192.168.1.100")
-	ctx = context.WithValue(ctx, "user_agent", "Go-HTTP-Client/1.1")
-	
-	return ctx
+func handleRequest(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "开始处理HTTP请求")
+
+	// 调用业务逻辑
+	processBusinessLogic(ctx, logger)
+
+	logger.InfoContext(ctx, "HTTP请求处理完成")
 }
 
-// CreateOrder 创建订单的业务逻辑
-func (os *OrderService) CreateOrder(ctx context.Context, req CreateOrderRequest) CreateOrderResponse {
-	// 创建订单服务的日志器，携带请求上下文
-	orderLogger := os.logger.WithContext(ctx)
-	
-	orderLogger.InfoKV("开始处理订单创建请求",
-		"user_id", req.UserID,
-		"product_id", req.ProductID,
-		"amount", req.Amount,
-	)
-	
-	// 1. 验证用户
-	user, err := os.userSvc.ValidateUser(ctx, req.UserID)
-	if err != nil {
-		orderLogger.ErrorKV("用户验证失败",
-			"user_id", req.UserID,
-			"error", err.Error(),
-		)
-		return CreateOrderResponse{
-			Status:  "failed",
-			Message: "用户验证失败",
+func processBusinessLogic(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "执行业务逻辑")
+
+	// 调用数据库操作
+	queryDatabase(ctx, logger)
+
+	// 调用外部API
+	callExternalAPI(ctx, logger)
+
+	logger.InfoContext(ctx, "业务逻辑执行完成")
+}
+
+func queryDatabase(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "查询数据库")
+	time.Sleep(50 * time.Millisecond) // 模拟数据库查询
+	logger.InfoContext(ctx, "数据库查询完成")
+}
+
+func callExternalAPI(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "调用外部API")
+	time.Sleep(100 * time.Millisecond) // 模拟API调用
+	logger.InfoContext(ctx, "外部API调用完成")
+}
+
+// 上下文取消演示
+func demonstrateContextCancellation() {
+	fmt.Println("❌ 3. 上下文取消演示")
+	fmt.Println(strings.Repeat("-", 30))
+
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.INFO,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+	})
+	adapter.Initialize()
+
+	// 创建可取消的上下文
+	ctx, cancel := context.WithCancel(context.Background())
+
+	fmt.Println("\n🔹 启动可取消的任务:")
+
+	// 启动长时间运行的任务
+	go longRunningTask(ctx, adapter)
+
+	// 等待一段时间后取消
+	time.Sleep(2 * time.Second)
+	fmt.Println("\n🔹 取消任务:")
+	cancel()
+
+	// 等待任务完成
+	time.Sleep(500 * time.Millisecond)
+
+	defer adapter.Close()
+}
+
+func longRunningTask(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "开始长时间运行的任务")
+
+	for i := 0; i < 10; i++ {
+		select {
+		case <-ctx.Done():
+			logger.WarnContext(ctx, "任务被取消: %v", ctx.Err())
+			return
+		default:
+			logger.InfoContext(ctx, "任务进度: %d/10", i+1)
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
-	
-	orderLogger.DebugKV("用户验证成功",
-		"user_id", req.UserID,
-		"username", user["username"],
-	)
-	
-	// 2. 处理支付
-	paymentResult, err := os.paymentSvc.ProcessPayment(ctx, req.UserID, req.Amount)
-	if err != nil {
-		orderLogger.ErrorKV("支付处理失败",
-			"user_id", req.UserID,
-			"amount", req.Amount,
-			"error", err.Error(),
-		)
-		return CreateOrderResponse{
-			Status:  "failed",
-			Message: "支付处理失败",
+
+	logger.InfoContext(ctx, "长时间任务完成")
+}
+
+// 上下文超时演示
+func demonstrateContextTimeout() {
+	fmt.Println("⏰ 4. 上下文超时演示")
+	fmt.Println(strings.Repeat("-", 30))
+
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.INFO,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+	})
+	adapter.Initialize()
+
+	fmt.Println("\n🔹 设置2秒超时的任务:")
+
+	// 创建带超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 启动可能超时的任务
+	timeoutTask(ctx, adapter)
+
+	defer adapter.Close()
+}
+
+func timeoutTask(ctx context.Context, logger logger.IAdapter) {
+	logger.InfoContext(ctx, "开始可能超时的任务")
+
+	// 模拟耗时操作
+	for i := 0; i < 5; i++ {
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				logger.ErrorContext(ctx, "任务超时")
+			} else {
+				logger.WarnContext(ctx, "任务被取消")
+			}
+			return
+		default:
+			logger.InfoContext(ctx, "执行步骤 %d", i+1)
+			time.Sleep(800 * time.Millisecond) // 每步800ms，总共需要4秒
 		}
 	}
-	
-	// 3. 创建订单
-	orderID := fmt.Sprintf("order-%d", time.Now().UnixNano())
-	orderLogger.InfoKV("订单创建成功",
-		"order_id", orderID,
-		"user_id", req.UserID,
-		"amount", req.Amount,
-		"payment_id", paymentResult["payment_id"],
-	)
-	
-	return CreateOrderResponse{
-		OrderID: orderID,
-		Status:  "success",
-		Message: "订单创建成功",
-	}
+
+	logger.InfoContext(ctx, "任务成功完成")
 }
 
-// ValidateUser 验证用户
-func (us *UserService) ValidateUser(ctx context.Context, userID int) (map[string]interface{}, error) {
-	userLogger := us.logger.WithContext(ctx)
-	
-	userLogger.DebugKV("开始用户验证",
-		"user_id", userID,
-		"validation_type", "identity_check",
-	)
-	
-	// 模拟数据库查询
-	time.Sleep(time.Millisecond * 50)
-	
-	// 模拟用户不存在的情况
-	if userID == 9999 {
-		userLogger.WarnKV("用户不存在",
-			"user_id", userID,
-			"check_result", "not_found",
-		)
-		return nil, fmt.Errorf("user %d not found", userID)
+// 上下文值传递
+func demonstrateContextValues() {
+	fmt.Println("💼 5. 上下文值传递")
+	fmt.Println(strings.Repeat("-", 30))
+
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.INFO,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+	})
+	adapter.Initialize()
+
+	fmt.Println("\n🔹 在上下文中传递跟踪信息:")
+
+	// 创建带跟踪信息的上下文
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, "traceID", "trace-abc123")
+	ctx = context.WithValue(ctx, "spanID", "span-def456")
+	ctx = context.WithValue(ctx, "userID", "user-12345")
+	ctx = context.WithValue(ctx, "sessionID", "sess-789")
+
+	// 使用WithContext创建带上下文的logger
+	contextLogger := adapter.WithContext(ctx)
+
+	fmt.Println("  模拟业务流程:")
+	contextLogger.Info("用户认证")
+	contextLogger.Info("权限检查")
+	contextLogger.Info("数据查询")
+	contextLogger.Info("结果返回")
+
+	// 演示从上下文提取值
+	fmt.Println("\n🔹 从上下文提取信息:")
+	if traceID := ctx.Value("traceID"); traceID != nil {
+		adapter.InfoContext(ctx, "当前追踪ID: %s", traceID)
 	}
-	
-	// 模拟成功的用户验证
-	user := map[string]interface{}{
-		"user_id":  userID,
-		"username": fmt.Sprintf("user%d", userID),
-		"status":   "active",
-		"level":    "premium",
+	if userID := ctx.Value("userID"); userID != nil {
+		adapter.InfoContext(ctx, "当前用户ID: %s", userID)
 	}
-	
-	userLogger.InfoKV("用户验证通过",
-		"user_id", userID,
-		"username", user["username"],
-		"status", user["status"],
-		"level", user["level"],
-	)
-	
-	return user, nil
+
+	defer adapter.Close()
 }
 
-// ProcessPayment 处理支付
-func (ps *PaymentService) ProcessPayment(ctx context.Context, userID int, amount float64) (map[string]interface{}, error) {
-	paymentLogger := ps.logger.WithContext(ctx)
-	
-	paymentLogger.InfoKV("开始处理支付",
-		"user_id", userID,
-		"amount", amount,
-		"currency", "USD",
-		"payment_method", "credit_card",
-	)
-	
-	// 模拟支付处理时间
-	processingTime := time.Duration(rand.Intn(200)+100) * time.Millisecond
-	time.Sleep(processingTime)
-	
-	// 模拟支付ID生成
-	paymentID := fmt.Sprintf("pay-%d", time.Now().UnixNano())
-	
-	paymentLogger.InfoKV("支付处理完成",
-		"user_id", userID,
-		"amount", amount,
-		"payment_id", paymentID,
-		"processing_time_ms", processingTime.Milliseconds(),
-		"status", "completed",
-	)
-	
-	return map[string]interface{}{
-		"payment_id": paymentID,
-		"status":     "completed",
-		"amount":     amount,
-		"currency":   "USD",
-	}, nil
+// 实际应用场景
+func demonstrateRealWorldScenarios() {
+	fmt.Println("🌍 6. 实际应用场景")
+	fmt.Println(strings.Repeat("-", 30))
+
+	adapter, _ := logger.NewStandardAdapter(&logger.AdapterConfig{
+		Type:       logger.StandardAdapter,
+		Level:      logger.INFO,
+		Output:     os.Stdout,
+		TimeFormat: "15:04:05",
+	})
+	adapter.Initialize()
+
+	fmt.Println("\n🔹 Web服务器请求处理:")
+	simulateWebServer(adapter)
+
+	fmt.Println("\n🔹 并发任务处理:")
+	simulateConcurrentTasks(adapter)
+
+	defer adapter.Close()
 }
 
-// 模拟HTTP中间件，展示如何在HTTP处理器中使用上下文日志
-func LoggingMiddleware(logger logger.ILogger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// 为每个HTTP请求创建上下文
-			ctx := r.Context()
-			requestID := fmt.Sprintf("req-%d", time.Now().UnixNano())
-			ctx = context.WithValue(ctx, "request_id", requestID)
-			ctx = context.WithValue(ctx, "method", r.Method)
-			ctx = context.WithValue(ctx, "path", r.URL.Path)
-			ctx = context.WithValue(ctx, "remote_addr", r.RemoteAddr)
-			ctx = context.WithValue(ctx, "user_agent", r.UserAgent())
-			
-			// 创建带上下文的日志器
-			reqLogger := logger.WithContext(ctx)
-			
-			// 记录请求开始
-			start := time.Now()
-			reqLogger.InfoKV("HTTP请求开始",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"remote_addr", r.RemoteAddr,
-				"user_agent", r.UserAgent(),
-			)
-			
-			// 调用下一个处理器
-			next.ServeHTTP(w, r.WithContext(ctx))
-			
-			// 记录请求完成
-			duration := time.Since(start)
-			reqLogger.InfoKV("HTTP请求完成",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"duration_ms", duration.Milliseconds(),
-				"status", "200", // 简化示例，实际应该从ResponseWriter获取
-			)
-		})
+func simulateWebServer(logger logger.IAdapter) {
+	// 模拟3个并发的HTTP请求
+	var wg sync.WaitGroup
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(requestID int) {
+			defer wg.Done()
+
+			// 为每个请求创建独立的上下文
+			ctx := context.Background()
+			ctx = context.WithValue(ctx, "requestID", fmt.Sprintf("req-%d", requestID))
+			ctx = context.WithValue(ctx, "startTime", time.Now())
+
+			// 模拟请求处理
+			logger.InfoContext(ctx, "收到HTTP请求")
+
+			// 随机处理时间
+			processingTime := time.Duration(rand.Intn(500)+100) * time.Millisecond
+			time.Sleep(processingTime)
+
+			if rand.Float32() > 0.7 { // 30% 概率出错
+				logger.ErrorContext(ctx, "请求处理失败")
+			} else {
+				logger.InfoContext(ctx, "请求处理成功，耗时: %v", processingTime)
+			}
+		}(i + 1)
 	}
+
+	wg.Wait()
+}
+
+func simulateConcurrentTasks(logger logger.IAdapter) {
+	// 创建带超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// 启动多个并发任务
+	var wg sync.WaitGroup
+	taskCount := 5
+
+	for i := 0; i < taskCount; i++ {
+		wg.Add(1)
+		go func(taskID int) {
+			defer wg.Done()
+
+			// 为每个任务创建子上下文
+			taskCtx := context.WithValue(ctx, "taskID", taskID)
+
+			logger.InfoContext(taskCtx, "任务开始")
+
+			// 模拟任务执行
+			for step := 0; step < 3; step++ {
+				select {
+				case <-taskCtx.Done():
+					logger.WarnContext(taskCtx, "任务被中断: %v", taskCtx.Err())
+					return
+				default:
+					logger.InfoContext(taskCtx, "执行步骤 %d", step+1)
+					time.Sleep(time.Duration(rand.Intn(800)+200) * time.Millisecond)
+				}
+			}
+
+			logger.InfoContext(taskCtx, "任务完成")
+		}(i + 1)
+	}
+
+	wg.Wait()
 }

@@ -24,6 +24,56 @@ go.work.sum
 # env file
 .env
 
+# Test related files
 /tests/*.png
-
 *.log
+coverage.html
+coverage.xml
+coverage.txt
+coverage
+coverage_*
+profile.out
+*.prof
+
+# Example executables and build artifacts
+/examples/**/*.exe
+/examples/**/main
+/examples/**/debug
+/examples/**/test
+/examples/**/demo
+/examples/**/*-demo*
+/examples/**/*demo*
+/examples/**/config-demo*
+/examples/**/benchmark*
+/examples/**/performance*
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs directory
+logs/
+*.log
+
+# Debug files
+debug
+debug.exe
+debug.test
+
+# Build artifacts
+dist/
+build/
+bin/
+
+# Test cache
+.cache/

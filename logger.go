@@ -53,6 +53,28 @@ func init() {
 	defaultLogger = NewLogger(DefaultConfig())
 }
 
+// New 创建新的日志记录器（简化版本）
+// 使用默认配置创建日志记录器，支持链式调用配置
+func New() *Logger {
+	return NewLogger(DefaultConfig())
+}
+
+// NewUltraFast 创建极致性能日志器（便利函数）
+// 使用优化配置创建UltraFastLogger
+func NewUltraFast() *UltraFastLogger {
+	return NewUltraFastLogger(DefaultConfig())
+}
+
+// NewOptimized 创建优化日志器（便利函数）
+// 使用平衡性能与功能的配置创建Logger
+func NewOptimized() *Logger {
+	config := DefaultConfig()
+	config.Level = INFO
+	config.Colorful = true
+	config.ShowCaller = false
+	return NewLogger(config)
+}
+
 // NewLogger 创建新的日志记录器
 func NewLogger(config *LogConfig) *Logger {
 	if config == nil {
@@ -123,6 +145,33 @@ func (l *Logger) UpdateConfig(config *LogConfig) {
 		prefix += " "
 	}
 	l.logger = log.New(config.Output, prefix, log.LstdFlags)
+}
+
+// WithLevel 设置日志级别并返回自身（链式调用）
+func (l *Logger) WithLevel(level LogLevel) *Logger {
+	l.SetLevel(level)
+	l.config.Level = level
+	return l
+}
+
+// WithShowCaller 设置是否显示调用者信息并返回自身（链式调用）
+func (l *Logger) WithShowCaller(show bool) *Logger {
+	l.SetShowCaller(show)
+	l.config.ShowCaller = show
+	return l
+}
+
+// WithPrefix 设置日志前缀并返回自身（链式调用）
+func (l *Logger) WithPrefix(prefix string) *Logger {
+	l.config.WithPrefix(prefix)
+	l.UpdateConfig(l.config)
+	return l
+}
+
+// WithColorful 设置是否使用彩色输出并返回自身（链式调用）
+func (l *Logger) WithColorful(colorful bool) *Logger {
+	l.config.WithColorful(colorful)
+	return l
 }
 
 // formatMessage 格式化消息 - 优化版本
