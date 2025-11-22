@@ -2,13 +2,13 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-09 10:50:45
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 13:23:25
- * @FilePath: \go-logger\metrics\monitor_test.go
+ * @LastEditTime: 2025-11-22 12:28:52
+ * @FilePath: \go-logger\metrics_monitor_test.go
  * @Description:
  *
  * Copyright (c) 2025 by kamalyes, All Rights Reserved.
  */
-package metrics
+package logger
 
 import (
 	"testing"
@@ -16,16 +16,16 @@ import (
 
 func TestMonitor(t *testing.T) {
 	m := NewMonitor()
-	
+
 	// 测试基础功能
 	done := m.Track()
 	done(nil)
-	
+
 	heap := m.FastMemory()
 	if heap == 0 {
 		t.Error("Heap should not be zero")
 	}
-	
+
 	healthy, pressure := m.QuickCheck()
 	if !healthy {
 		t.Error("Should be healthy")
@@ -33,14 +33,14 @@ func TestMonitor(t *testing.T) {
 	if pressure == "" {
 		t.Error("Pressure should not be empty")
 	}
-	
+
 	// 测试统计
 	ops, errors, current, peak, warnings, rate := m.Stats()
 	if ops == 0 {
 		t.Error("Should have operations")
 	}
-	
-	t.Logf("Stats: ops=%d errors=%d current=%d peak=%d warnings=%d rate=%f", 
+
+	t.Logf("Stats: ops=%d errors=%d current=%d peak=%d warnings=%d rate=%f",
 		ops, errors, current, peak, warnings, rate)
 	t.Logf("Monitor: %s", m.String())
 }

@@ -20,6 +20,7 @@
 [![Sourcegraph](https://sourcegraph.com/github.com/kamalyes/go-logger/-/badge.svg)](https://sourcegraph.com/github.com/kamalyes/go-logger?badge)
 
 
+
 ## 📚 文档导航
 
 ### 📖 官方文档
@@ -31,10 +32,14 @@
 - 📊 **[性能详解](docs/PERFORMANCE.md)** - 深入了解性能优化技术和基准测试结果
 - 🔄 **[迁移指南](docs/MIGRATION.md)** - 从其他日志库迁移的完整指南
 - 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
-- 📝 **[更新日志](docs/CHANGELOG.md)** - 版本更新和功能变更记录
+- 📝 **[更新日志](./CHANGELOG.md)** - 版本更新和功能变更记录
+- 🔧 **[配置指南](docs/CONFIGURATION.md)** - 完整配置选项和最佳实践
+- 🧩 **[适配器系统](docs/ADAPTERS.md)** - 适配器完整指南和自定义开发
+- 📊 **[监控系统](docs/MONITORING.md)** - 内存监控、性能分析和告警系统
+- 🎨 **[格式化器](docs/FORMATTERS.md)** - 日志格式化器详解和自定义开发
 
 ### 🔗 代码资源
-- 📋 **[示例代码](examples/)** - 丰富的使用示例和最佳实践
+- 📋 **[示例代码](examples/README.md)** - 丰富的使用示例和最佳实践
 - 🧪 **[基准测试](benchmark_test.go)** - 性能测试和对比分析
 - ⚡ **[极速日志器](ultra_fast_logger.go)** - 极致性能实现源码
 
@@ -78,23 +83,27 @@
 
 ```go
 // 🏆 极致性能 - UltraFastLogger (推荐)
-logger := NewUltraFastLogger(Config{
-    Level:      INFO,
-    TimeFormat: TimeFormatDisabled, // 最高性能
-})
+ultraLogger := logger.NewUltraFast()
+
+// 或使用完整配置
+config := logger.DefaultConfig()
+config.Level = logger.INFO
+config.Colorful = false
+config.ShowCaller = false
+ultraLogger = logger.NewUltraFastLogger(config)
 
 // ⚡ 高性能 - 优化版标准Logger  
-logger := NewOptimizedLogger(Config{
-    Level:      INFO,
-    TimeFormat: TimeFormatOptimized,
-})
+optimizedLogger := logger.NewOptimized()
 
 // 🛡️ 全功能 - 企业级Logger (默认)
-logger := NewLogger(Config{
-    Level:              INFO,
-    EnableMemoryStats:  true,
-    EnableDistributed:  true,
-})
+fullLogger := logger.New()
+
+// 或使用完整配置
+enterpriseConfig := logger.DefaultConfig()
+enterpriseConfig.Level = logger.INFO
+enterpriseConfig.ShowCaller = true
+enterpriseConfig.Colorful = true
+fullLogger = logger.NewLogger(enterpriseConfig)
 ```
 
 ### 🛡️ 监控架构 - 三层性能设计
@@ -131,17 +140,7 @@ fmt.Printf("系统健康: %v, 内存压力: %s", healthy, pressure)
 
 📖 **[查看详细性能分析 →](docs/PERFORMANCE.md)**
 
-## 🏗️ 架构设计
-
-### 核心架构重构 ✨
-经过重大重构，go-logger 实现了架构简化和性能优化：
-
-- **🚀 代码减少88%**：Context管理从1059行优化到128行
-- **🔧 统一服务架构**：单一ContextService替代多个管理器
-- **⚡ 性能提升**：简化的调用链和优化的内存使用
-- **🎯 API兼容性**：保持所有公共API接口不变
-
-### 模块化架构
+## 🏗️ 模块化架构
 ```
 go-logger/
 ├── config/              # 配置管理模块
@@ -163,18 +162,6 @@ go-logger/
 │   └── MIGRATION.md     # 迁移指南
 └── examples/            # 示例代码
 ```
-
-### Context服务架构
-- **ContextService**：统一的上下文管理服务
-- **简化设计**：移除复杂的管理器层级结构  
-- **全局函数**：直接的API调用，无需管理器实例
-- **字段提取**：高效的多维度上下文信息提取
-
-### 内存监控架构
-- **MemoryMonitor接口**：定义标准监控能力
-- **DefaultMemoryMonitor**：高性能默认实现
-- **多维度分析**：快照对比、历史趋势、堆增长、GC效率
-- **智能告警**：分级风险评估、自动优化建议
 
 ## 📦 快速开始
 
@@ -206,241 +193,30 @@ package main
 import (
     "context"
     "github.com/kamalyes/go-logger"
-    "github.com/kamalyes/go-logger/level"
 )
 
 func main() {
     // 🏆 极致性能版本 (推荐高并发场景)
-    logger := logger.NewUltraFast()
-    logger.Info("High performance logging", "key", "value")
+    ultraLogger := logger.NewUltraFast()
+    ultraLogger.Info("High performance logging")
+    ultraLogger.InfoKV("High performance with fields", "key", "value")
     
     // ⚡ 优化版标准Logger
-    logger := logger.NewOptimized()
-    logger.Info("Optimized logging with features", "key", "value")
+    optimizedLogger := logger.NewOptimized()
+    optimizedLogger.Info("Optimized logging with features")
     
     // 🛡️ 全功能企业版 (默认)
-    logger := logger.New()
-    logger.Info("Full featured logging")
+    fullLogger := logger.New()
+    fullLogger.Info("Full featured logging")
     
-    // 🎯 Context使用（统一架构）
-    ctx := context.Background()
-    ctx = logger.WithTraceID(ctx, "trace-123")
-    ctx = logger.WithUserID(ctx, "user-456")
-    
-    // 直接获取ID（简化API）
-    traceID := logger.GetTraceID(ctx)
-    userID := logger.GetUserID(ctx)
-    
-    // 自动提取所有字段
-    logger.InfoWithContext(ctx, logger, "带上下文的日志")
-}
-```
-
-### Context管理（重构后）
-
-```go
-// ✨ 新的统一架构 - 简单直观
-func modernContextUsage() {
+    // 🎯 使用现有的Context ID管理
     ctx := context.Background()
     
-    // 设置各种ID（统一接口）
-    ctx = logger.WithTraceID(ctx, "trace-123")
-    ctx = logger.WithSpanID(ctx, "span-456") 
-    ctx = logger.WithUserID(ctx, "user-789")
-    ctx = logger.WithTenantID(ctx, "tenant-001")
-    
-    // 获取ID（直接简单）
-    traceID := logger.GetTraceID(ctx)      // "trace-123"
-    spanID := logger.GetSpanID(ctx)        // "span-456"
-    userID := logger.GetUserID(ctx)        // "user-789"
-    
-    // 自动生成ID
-    ctx, newTraceID := logger.GetOrGenerateTraceID(ctx)
-    
-    // 批量提取所有字段
-    fields := logger.ExtractFields(ctx)
-    // fields = {
-    //   "trace_id": "trace-123",
-    //   "span_id": "span-456", 
-    //   "user_id": "user-789",
-    //   "tenant_id": "tenant-001"
-    // }
-    
-    // 创建Span（继承TraceID）
-    spanCtx := logger.CreateSpan(ctx, "database_query")
-    
-    // 相关性链追踪
-    chain, corrCtx := logger.CreateCorrelationChain(ctx)
-    chain.SetTag("operation", "user_login")
-    chain.SetMetric("duration_ms", 150)
-    defer logger.EndCorrelationChain(chain)
+    // 直接使用日志记录（结构化字段通过WithField添加）
+    fullLogger.WithField("trace_id", "trace-123").
+               WithField("user_id", "user-456").
+               Info("带上下文的日志")
 }
-```
-
-## 💡 高级使用
-
-### 性能优化配置
-
-```go
-// 针对不同场景的性能配置
-config := Config{
-    Level: INFO,
-    
-    // 高性能场景：禁用时间戳
-    TimeFormat: TimeFormatDisabled,
-    
-    // 普通场景：优化时间格式
-    TimeFormat: TimeFormatOptimized,
-    
-    // 调试场景：完整功能
-    EnableMemoryStats:  true,
-    EnableDistributed:  true,
-    TimeFormat:        TimeFormatStandard,
-}
-
-logger := NewUltraFastLogger(config)
-```
-
-### 内存监控示例
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-    "github.com/kamalyes/go-logger/metrics"
-)
-
-func main() {
-    // 创建内存监控器
-    monitor := metrics.NewDefaultMemoryMonitor()
-    
-    // 设置内存阈值为85%
-    monitor.SetMemoryThreshold(85.0)
-    
-    // 设置阈值超出回调
-    monitor.OnMemoryThresholdExceeded(func(info *metrics.MemoryInfo) {
-        fmt.Printf("⚠️  内存使用率超出阈值: %.2f%%\n", info.MemoryUsage)
-        fmt.Printf("已使用内存: %d MB\n", info.UsedMemory/1024/1024)
-    })
-    
-    // 启动监控
-    if err := monitor.Start(); err != nil {
-        panic(err)
-    }
-    defer monitor.Stop()
-    
-    // 获取实时内存信息
-    memInfo := monitor.GetMemoryInfo()
-    fmt.Printf("当前内存使用率: %.2f%%\n", memInfo.MemoryUsage)
-    fmt.Printf("堆内存: %d MB\n", memInfo.GoHeap/1024/1024)
-    fmt.Printf("GC次数: %d\n", monitor.GetGCInfo().NumGC)
-    
-    // 创建内存快照
-    snapshot, _ := monitor.TakeHeapSnapshot()
-    fmt.Printf("快照时间: %s\n", snapshot.Timestamp)
-    fmt.Printf("总对象数: %d\n", snapshot.ObjectCount)
-    
-    // 分析内存泄漏
-    report := monitor.AnalyzeMemoryLeaks()
-    fmt.Printf("内存趋势: %s\n", report.GrowthTrend)
-    fmt.Printf("增长率: %.2f bytes/s\n", report.MemoryGrowthRate)
-    
-    time.Sleep(5 * time.Second)
-}
-```
-
-### 性能监控示例
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-    "github.com/kamalyes/go-logger/metrics"
-)
-
-func main() {
-    // 创建统计收集器
-    stats := metrics.NewDefaultStatsCollector()
-    
-    // 开始性能监控
-    perfMonitor := metrics.NewDefaultPerformanceMonitor()
-    perfMonitor.Start()
-    defer perfMonitor.Stop()
-    
-    // 模拟一些操作
-    for i := 0; i < 100; i++ {
-        start := time.Now()
-        
-        // 模拟业务操作
-        time.Sleep(time.Millisecond * 10)
-        
-        // 记录操作统计
-        duration := time.Since(start)
-        stats.RecordOperation("user_query", duration, nil)
-    }
-    
-    // 获取性能统计
-    perfStats := perfMonitor.GetPerformanceStats()
-    fmt.Printf("总操作数: %d\n", perfStats.TotalOperations)
-    fmt.Printf("平均延迟: %v\n", perfStats.AvgLatency)
-    fmt.Printf("吞吐量: %.2f ops/s\n", perfStats.Throughput)
-    
-    // 获取操作统计
-    opStats := stats.GetOperationStats("user_query")
-    fmt.Printf("用户查询统计:\n")
-    fmt.Printf("  总数: %d\n", opStats.Count)
-    fmt.Printf("  平均耗时: %v\n", opStats.AvgDuration)
-    fmt.Printf("  成功率: %.2f%%\n", opStats.SuccessRate*100)
-}
-```
-
-## ⚙️ 配置选项
-
-### 内存监控配置
-
-```go
-monitor := metrics.NewDefaultMemoryMonitor()
-
-// 设置采样间隔
-monitor.SetSampleInterval(time.Second * 3)
-
-// 设置内存阈值 (百分比)
-monitor.SetMemoryThreshold(80.0)
-
-// 设置最大内存限制 (字节)
-monitor.SetMaxMemory(2 * 1024 * 1024 * 1024) // 2GB
-
-// 设置GC百分比
-monitor.SetGCPercent(75)
-
-// 启用/禁用内存泄漏检测
-monitor.EnableLeakDetection(true)
-
-// 设置历史数据保留数量
-monitor.SetMaxHistorySize(200)
-```
-
-### 日志级别配置
-
-```go
-import "github.com/kamalyes/go-logger/level"
-
-// 24种日志级别支持
-levels := []level.Level{
-    level.TRACE,    level.DEBUG,    level.INFO,     level.NOTICE,
-    level.WARN,     level.ERROR,    level.CRITICAL, level.ALERT,
-    level.EMERGENCY, level.FATAL,   level.AUDIT,    level.SECURITY,
-    // ... 更多级别
-}
-
-// 创建级别管理器
-manager := level.NewManager()
-manager.SetLevel(level.INFO)
-manager.SetPattern("user_*", level.DEBUG) // 用户相关日志使用DEBUG级别
 ```
 
 ## 🤝 社区贡献
@@ -492,20 +268,15 @@ manager.SetPattern("user_*", level.DEBUG) // 用户相关日志使用DEBUG级别
 
 ## 📊 性能基准
 
-### 内存监控性能
+最新性能测试结果：
 
 ```
-BenchmarkMemoryMonitor_GetMemoryInfo-8    	100000	     12847 ns/op	    2456 B/op	      23 allocs/op
-BenchmarkMemoryMonitor_TakeHeapSnapshot-8  	  5000	    234567 ns/op	   45123 B/op	     567 allocs/op
-BenchmarkMemoryMonitor_CheckMemoryLeaks-8  	 10000	    156789 ns/op	   12345 B/op	     123 allocs/op
+BenchmarkUltraFastLogger-8       157894737     7.56 ns/op     0 B/op     0 allocs/op
+BenchmarkStandardLogger-8         52631578    22.85 ns/op     8 B/op     1 allocs/op
+BenchmarkMemoryMonitor-8           9803921   122.4 ns/op    48 B/op     2 allocs/op
 ```
 
-### 统计收集性能
-
-```
-BenchmarkStatsCollector_RecordOperation-8  	1000000	      1234 ns/op	     256 B/op	       5 allocs/op
-BenchmarkPerformanceMonitor_GetStats-8     	 500000	      2345 ns/op	     512 B/op	      12 allocs/op
-```
+详细性能分析请参考 [性能文档](docs/PERFORMANCE.md)。
 
 ## ⭐ Star 历史
 

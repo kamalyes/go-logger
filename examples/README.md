@@ -1,381 +1,262 @@
-# Go Logger 示例
+# Go Logger 示例集合
 
-本目录包含了 go-logger 库的各种使用示例。
+本目录包含了 go-logger 库的完整使用示例，涵盖从基础使用到企业级功能的各种场景。
 
-## 目录结构
+## 📚 示例导航
 
+### 🚀 快速开始
+- **[基础使用](basic/)** - 最简单的日志使用方法，包括便利函数验证
+- **[便利函数](convenience/)** - NewUltraFast()、NewOptimized()、New() 使用示例
+- **[性能测试](benchmark/)** - 性能基准测试和优化
+
+### 🔧 核心功能  
+- **[配置系统](configuration/)** - 完整的配置选项演示
+- **[适配器系统](adapters/)** - 多种适配器使用和管理
+- **[格式化器](formatters/)** - 日志格式化器的使用
+- **[监控系统](monitoring/)** - 内存和性能监控功能
+
+### 🎯 高级功能
+- **[Context追踪](context/)** - 分布式系统上下文管理
+- **[工厂模式](factory/)** - 高级日志器构建
+- **[增强功能](enhanced/)** - 企业级增强功能
+- **[兼容性](compatibility/)** - 多框架兼容性演示
+
+## 🏃‍♂️ 快速运行
+
+### 运行所有示例
+```bash
+make run-all
 ```
-examples/
-├── basic/          # 基础使用示例
-├── adapters/       # 适配器使用示例
-├── factory/        # 工厂模式示例
-├── benchmark/      # 性能基准测试示例
-├── configuration/  # 配置使用示例
-├── enhanced/       # 增强接口功能演示（新增）
-├── context/        # 上下文感知日志演示（新增）
-├── compatibility/  # 多框架兼容性演示（新增）
-└── README.md       # 本文件
+
+### 运行特定示例
+```bash
+cd <example-directory>
+go run main.go
 ```
 
-## 快速开始
+## 📖 示例说明
 
 ### 1. 基础使用 (basic/)
-
-演示最基本的日志库使用方法：
-
-```bash
-cd basic
-go run main.go
-```
-
-**特性演示：**
-- 基本日志级别使用
+演示最基本的日志功能：
+- 基本日志级别
 - 结构化日志
-- 错误日志
+- 错误处理
 - 链式调用
-- 日志器克隆
-
-### 2. 适配器使用 (adapters/)
-
-演示如何使用日志适配器和管理器：
 
 ```bash
-cd adapters
-go run main.go
+cd basic && go run main.go
 ```
 
-**特性演示：**
-- 创建和管理适配器
-- 适配器级别设置
-- 管理器广播
-- 健康检查
-- 资源管理
-
-### 3. 工厂模式 (factory/)
-
-演示使用工厂模式创建日志器：
+### 2. 配置系统 (configuration/)
+演示完整的配置功能：
+- 环境特定配置
+- 动态配置更新
+- 配置文件支持
+- 最佳实践
 
 ```bash
-cd factory
-go run main.go
+cd configuration && go run main.go
 ```
 
-**特性演示：**
-- 日志器构建器
-- 链式配置
-- 钩子集成
-- 中间件使用
-- 复杂配置组合
+### 3. 适配器系统 (adapters/)
+演示各种适配器的使用：
+- Console、File、Network 适配器
+- 企业级适配器 (Elasticsearch, Redis, Kafka)
+- 自定义适配器开发
+- 适配器管理和路由
 
-### 4. 性能基准测试 (benchmark/)
+```bash
+cd adapters && go run main.go
+```
 
+### 4. 格式化器 (formatters/)
+演示日志格式化功能：
+- 内置格式化器 (JSON, Text, CSV, XML)
+- 自定义格式化器
+- 模板引擎
+- 条件格式化
+
+```bash
+cd formatters && go run main.go
+```
+
+### 5. 监控系统 (monitoring/)
+演示监控和性能分析：
+- 内存监控
+- 性能监控
+- I/O 监控
+- 告警系统
+
+```bash
+cd monitoring && go run main.go
+```
+
+### 6. Context追踪 (context/)
+演示分布式系统上下文管理：
+- TraceID 和 SpanID
+- 微服务间追踪
+- HTTP 请求追踪
+- 错误传播
+
+```bash
+cd context && go run main.go
+```
+
+### 7. 性能测试 (benchmark/)
 演示性能测试和优化：
+- 基准测试
+- 并发性能测试
+- 内存使用分析
+- 性能对比
 
 ```bash
-cd benchmark
-go run main.go
+cd benchmark && go run main.go
 ```
 
-**特性演示：**
-- 基本性能测试
-- 结构化日志性能
-- 不同级别性能对比
-- 并发日志性能
-
-### 5. 配置使用 (configuration/)
-
-演示各种配置选项：
+### 8. 工厂模式 (factory/)
+演示高级日志器构建：
+- 构建器模式
+- 复杂配置组合
+- 中间件集成
+- 插件系统
 
 ```bash
-cd configuration
-go run main.go
+cd factory && go run main.go
 ```
 
-**特性演示：**
-- 默认配置
-- 时间格式配置
-- 输出目标配置
-- 级别配置
-- 调用者信息配置
-- 彩色输出配置
-- 配置验证和克隆
-
-### 6. 增强接口功能 (enhanced/)
-
-演示新增的增强接口功能：
+### 9. 增强功能 (enhanced/)
+演示企业级增强功能：
+- 纯文本消息日志
+- 上下文感知日志
+- 结构化键值对日志
+- 多框架兼容性
 
 ```bash
-cd enhanced
-go run main.go
+cd enhanced && go run main.go
 ```
 
-**特性演示：**
-- 纯文本消息日志（DebugMsg, InfoMsg 等）
-- 上下文感知日志（WithContext, DebugContext 等）
-- 结构化键值对日志（InfoKV, ErrorKV 等）
-- 原始日志条目方法（Log, LogKV, LogWithFields）
-- 多框架兼容性（Zap, Logrus, slog 风格）
-- 标准库兼容性（Print, Printf, Println）
-
-### 7. 上下文感知日志 (context/)
-
-演示微服务中的上下文日志追踪：
+### 10. 兼容性 (compatibility/)
+演示多框架兼容性：
+- Zap 风格日志
+- Logrus 风格日志
+- slog 风格日志
+- 标准库兼容
 
 ```bash
-cd context
-go run main.go
+cd compatibility && go run main.go
 ```
 
-**特性演示：**
-- 分布式追踪上下文传递
-- 微服务间日志关联
-- HTTP请求生命周期跟踪
-- 错误传播和追踪
-- 后台任务上下文管理
+## 🎯 最佳实践指南
 
-### 8. 多框架兼容性 (compatibility/)
-
-演示与主流日志框架的兼容性：
-
-```bash
-cd compatibility
-go run main.go
-```
-
-**特性演示：**
-- Zap 风格的键值对日志
-- Logrus 风格的字段日志
-- slog 风格的上下文日志
-- Zerolog 风格的事件日志
-- 标准库 log 的兼容性
-- 混合使用多种风格
-
-## 核心概念
-
-### 日志级别
+### 选择合适的日志方法
 
 ```go
-logger.DEBUG   // 调试级别
-logger.INFO    // 信息级别  
-logger.WARN    // 警告级别
-logger.ERROR   // 错误级别
-logger.FATAL   // 致命级别
-```
+// 1. 简单消息 - 使用 *Msg 方法
+logger.InfoMsg("操作完成")
+logger.ErrorMsg("操作失败")
 
-### 基本使用
+// 2. 格式化消息 - 使用标准方法
+logger.Info("处理用户 %s 的请求", username)
+logger.Error("连接数据库失败: %v", err)
 
-```go
-// 创建日志器
-log := logger.NewLogger(logger.DefaultConfig())
-
-// 记录不同级别的日志
-log.Debug("调试信息")
-log.Info("普通信息") 
-log.Warn("警告信息")
-log.Error("错误信息")
-```
-
-### 增强功能（新）
-
-#### 纯文本消息日志
-```go
-log.InfoMsg("纯文本信息")
-log.ErrorMsg("纯文本错误")
-```
-
-#### 上下文感知日志
-```go
-ctx := context.Background()
-log.InfoContext(ctx, "处理请求: %s", "login")
-log.ErrorContext(ctx, "处理失败: %v", err)
-
-// 创建带上下文的日志器
-ctxLogger := log.WithContext(ctx)
-ctxLogger.Info("携带上下文的日志")
-```
-
-#### 结构化键值对日志（类似Zap）
-```go
-log.InfoKV("用户登录",
+// 3. 结构化日志 - 使用 *KV 方法
+logger.InfoKV("用户登录",
     "user_id", 12345,
-    "username", "john_doe",
-    "ip_address", "192.168.1.100",
+    "username", "john",
+    "ip", "192.168.1.100",
 )
+
+// 4. 上下文追踪 - 使用 *Context 方法
+logger.InfoContext(ctx, "处理请求")
+logger.ErrorContext(ctx, "请求失败: %v", err)
 ```
 
-#### 原始日志条目方法
-```go
-log.Log(logger.INFO, "原始信息日志")
-log.LogKV(logger.ERROR, "错误日志", "error_code", "E001")
-log.LogWithFields(logger.DEBUG, "调试信息", map[string]interface{}{
-    "component": "auth",
-    "action": "validate",
-})
-```
-
-#### 多框架兼容性
-```go
-// Zap 风格
-log.InfoKV("消息", "key1", "value1", "key2", "value2")
-
-// Logrus 风格  
-log.WithField("component", "auth").Info("消息")
-log.WithFields(map[string]interface{}{"k1": "v1"}).Info("消息")
-
-// slog 风格
-log.InfoContext(ctx, "处理请求: %s", "data")
-
-// 标准库 log 风格
-log.Printf("格式化消息: %s", "data")
-log.Println("简单消息")
-```
-
-### 结构化日志
+### 性能优化建议
 
 ```go
-// 单个字段
-log.WithField("user_id", 12345).Info("用户操作")
-
-// 多个字段
-log.WithFields(map[string]interface{}{
-    "user_id": 12345,
-    "action": "login",
-    "ip": "192.168.1.1",
-}).Info("用户登录")
-```
-
-### 错误处理
-
-```go
-err := someFunction()
-if err != nil {
-    log.WithError(err).Error("操作失败")
+// 生产环境配置
+config := logger.Config{
+    Level:      logger.INFO,          // 合适的日志级别
+    ShowCaller: false,                // 关闭调用者信息
+    Colorful:   false,                // 关闭颜色输出
+    TimeFormat: "2006-01-02T15:04:05Z", // 标准时间格式
 }
 ```
 
-### 配置选项
+### 错误处理模式
 
 ```go
-config := logger.DefaultConfig().
-    WithLevel(logger.DEBUG).
-    WithShowCaller(true).
-    WithColorful(true).
-    WithPrefix("[MyApp] ").
-    WithTimeFormat("2006-01-02 15:04:05")
+// 方式1: 使用 WithError
+if err != nil {
+    logger.WithError(err).Error("操作失败")
+    return err
+}
 
-log := logger.NewLogger(config)
+// 方式2: 使用结构化日志
+if err != nil {
+    logger.ErrorKV("数据库操作失败",
+        "operation", "INSERT",
+        "table", "users",
+        "error", err.Error(),
+    )
+    return err
+}
 ```
 
-## 最佳实践
+### 上下文使用模式
 
-### 1. 选择合适的日志级别和方法
-   - 生产环境使用 INFO 或更高级别
-   - 开发环境可以使用 DEBUG 级别
-   - 根据场景选择最合适的日志方法：
-     * 简单消息：使用 `InfoMsg()`, `ErrorMsg()` 等
-     * 格式化消息：使用 `Info()`, `Error()` 等
-     * 结构化数据：使用 `InfoKV()`, `ErrorKV()` 等
-     * 上下文追踪：使用 `InfoContext()`, `ErrorContext()` 等
+```go
+// HTTP 处理器模式
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    reqLogger := logger.WithContext(ctx)
+    
+    reqLogger.Info("开始处理请求")
+    defer reqLogger.Info("请求处理完成")
+    
+    // 使用带上下文的日志器
+    processRequest(reqLogger)
+}
 
-### 2. 上下文感知日志使用
-   - 在HTTP服务中传递请求上下文
-   - 使用 `WithContext()` 创建携带上下文的日志器
-   - 在微服务间传递追踪信息
-   ```go
-   // 推荐模式
-   func handleRequest(ctx context.Context, log logger.ILogger) {
-       reqLogger := log.WithContext(ctx)
-       reqLogger.Info("开始处理请求")
-       // ... 处理逻辑
-       reqLogger.Info("请求处理完成")
-   }
-   ```
+// 服务层模式
+func processRequest(log logger.ILogger) {
+    log.Info("执行业务逻辑")
+    // ...
+}
+```
 
-### 3. 结构化日志使用
-   - 优先使用键值对日志而非字符串拼接
-   - 保持字段名称的一致性
-   - 使用有意义的字段名
-   ```go
-   // 推荐
-   log.InfoKV("用户操作",
-       "user_id", 12345,
-       "action", "login",
-       "ip", "192.168.1.100",
-   )
-   
-   // 不推荐
-   log.Info("用户 %d 从 %s 登录", 12345, "192.168.1.100")
-   ```
+## 📊 性能参考
 
-### 4. 错误处理最佳实践
-   ```go
-   // 使用 WithError 记录错误
-   if err != nil {
-       log.WithError(err).Error("操作失败")
-       return err
-   }
-   
-   // 或使用键值对格式
-   if err != nil {
-       log.ErrorKV("数据库操作失败",
-           "operation", "INSERT",
-           "table", "users",
-           "error", err.Error(),
-       )
-       return err
-   }
-   ```
+基于最新的基准测试结果：
 
-### 5. 多框架兼容性使用
-   - 在迁移项目时可以保持原有的日志调用风格
-   - 混合使用不同风格以适应不同场景
-   - 团队内保持风格一致性
+```
+BenchmarkUltraFastLogger-8       157894737     7.56 ns/op     0 B/op     0 allocs/op
+BenchmarkStandardLogger-8         52631578    22.85 ns/op     8 B/op     1 allocs/op
+BenchmarkStructuredLogging-8      15789473    75.8 ns/op    24 B/op     1 allocs/op
+```
 
-### 6. 合理使用调用者信息
-   - 开发时开启，便于调试
-   - 生产环境关闭，提高性能
+详细性能分析请查看 [性能文档](../docs/PERFORMANCE.md)。
 
-### 7. 配置验证
-   - 在应用启动时验证日志配置
-   - 确保配置的正确性
+## 🔗 相关文档
 
-### 8. 资源管理
-   - 适当时机刷新和关闭日志器
-   - 避免内存泄漏
+- [📊 性能详解](../docs/PERFORMANCE.md)
+- [🔧 配置指南](../docs/CONFIGURATION.md)  
+- [🧩 适配器系统](../docs/ADAPTERS.md)
+- [📊 监控系统](../docs/MONITORING.md)
+- [🎨 格式化器](../docs/FORMATTERS.md)
+- [🎯 Context使用指南](../docs/CONTEXT_USAGE.md)
 
-## 性能提示
+## 🤝 贡献指南
 
-1. **关闭不必要的功能**
-   ```go
-   config := logger.DefaultConfig().
-       WithShowCaller(false).  // 关闭调用者信息
-       WithColorful(false)     // 关闭彩色输出
-   ```
+欢迎提交新的示例！请确保：
 
-2. **批量日志处理**
-   - 在高并发场景下考虑缓冲
-   - 合理设置刷新间隔
+1. 添加详细的注释说明
+2. 包含错误处理
+3. 遵循最佳实践
+4. 更新相应的文档
 
-3. **级别过滤**
-   - 设置合适的日志级别
-   - 避免记录不必要的日志
+## 📞 获取帮助
 
-## 常见问题
-
-### Q: 如何在生产环境中使用？
-A: 建议使用 INFO 级别，关闭彩色输出和调用者信息，设置合适的时间格式。
-
-### Q: 如何处理大量日志？
-A: 考虑使用适配器将日志输出到文件或外部系统，设置合适的缓冲和刷新策略。
-
-### Q: 如何集成到现有项目？
-A: 可以逐步替换现有日志库，先在新功能中使用，然后逐步迁移旧代码。
-
-### Q: 性能如何？
-A: 在关闭不必要功能的情况下，性能表现良好。参考 benchmark 示例了解具体数据。
-
-## 更多信息
-
-- [项目主页](https://github.com/kamalyes/go-logger)
+- [GitHub Issues](https://github.com/kamalyes/go-logger/issues)
 - [API 文档](https://pkg.go.dev/github.com/kamalyes/go-logger)
-- [问题反馈](https://github.com/kamalyes/go-logger/issues)
+- [项目主页](https://github.com/kamalyes/go-logger)

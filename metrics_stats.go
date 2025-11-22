@@ -2,14 +2,14 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-07 00:00:00
- * @FilePath: \go-logger\metrics\stats.go
+ * @LastEditTime: 2025-11-22 12:31:10
+ * @FilePath: \go-logger\metrics_stats.go
  * @Description: 统计模块 - 收集和管理日志统计信息
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 
-package metrics
+package logger
 
 import (
 	"fmt"

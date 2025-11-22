@@ -2,14 +2,14 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-09 11:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 11:00:00
- * @FilePath: \go-logger\metrics\optimized_monitor.go
+ * @LastEditTime: 2025-11-22 12:29:53
+ * @FilePath: \go-logger\metrics_optimized_monitor.go
  * @Description: 极致性能优化的监控器实现
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 
-package metrics
+package logger
 
 import (
 	"fmt"

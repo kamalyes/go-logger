@@ -151,23 +151,37 @@ BenchmarkStdLog-8                      305145283       3.9 ns/op     0 B/op    0
 
 #### 🚀 极致性能场景
 ```go
-// 高频调用、性能敏感
+// 便利函数创建
+logger := logger.NewUltraFast()
+logger.Info("高频操作完成")  
+
+// 或无时间戳版本（最快）
 logger := logger.NewUltraFastLoggerNoTime(output, logger.INFO)
 logger.InfoMsg("高频操作完成")  // 最快
 ```
 
 #### ⚡ 高性能场景  
 ```go
-// 平衡性能与功能
+// 便利函数创建
+logger := logger.NewOptimized()
+logger.Info("操作完成")
+
+// 或完整配置版本
+config := logger.DefaultConfig()
 logger := logger.NewUltraFastLogger(config)
-logger.Info("操作完成，耗时: %dms", duration)  // 格式化支持
+logger.Info("操作完成")  
 ```
 
 #### 📋 标准场景
 ```go
-// 最大兼容性
-logger := logger.NewLogger(config) 
+// 便利函数创建
+logger := logger.New()
 logger.WithField("user_id", 123).Info("用户操作")  // 完整功能
+
+// 或完整配置版本
+config := logger.DefaultConfig()
+logger := logger.NewLogger(config) 
+logger.WithField("user_id", 123).Info("用户操作")  
 ```
 
 ### 性能优化技巧

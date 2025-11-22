@@ -2,6 +2,80 @@
 
 本文档记录了 go-logger 的所有版本变更和重要更新。
 
+## v1.5.0 (2025-11-22) - 📚 文档完善与便利函数增强
+
+### 🌟 核心变更
+
+- **✨ 便利函数完善**：添加 `NewUltraFast()` 和 `NewOptimized()` 便利函数
+- **📚 文档同步**：确保所有文档与代码实现完全一致
+- **🔧 API统一**：统一便利函数和配置函数的使用方式
+- **🧪 示例完善**：新增完整的便利函数使用示例
+- **🐛 问题修复**：修复 `examples/configuration/main.go` 中的API不一致问题
+
+### 📋 详细更新
+
+#### 新增便利函数
+- ✨ **NewUltraFast()**：创建极致性能日志器，返回 `*UltraFastLogger`
+- ✨ **NewOptimized()**：创建优化性能日志器，返回 `*Logger`（平衡性能与功能）
+- ✅ **New()**：保持现有标准日志器便利函数不变
+
+#### 文档更新
+- 📚 **README.md**：更新基础用法示例，使用正确的便利函数API
+- 📖 **docs/USAGE.md**：完善三层性能架构说明，添加便利函数创建方式
+- 📊 **性能对比表**：添加创建方式列，明确各层级的便利函数
+- 🔗 **示例导航**：更新所有文档中的API引用
+
+#### 示例代码更新
+- 🔧 **examples/configuration/main.go**：修复所有API不一致问题
+  - 替换 `logger.New(options...)` 为 `logger.NewLogger(config)`
+  - 修正常量名称：`logger.DebugLevel` → `logger.DEBUG`
+  - 移除不存在的格式化器引用
+- ✨ **examples/convenience/**（新增）：完整的便利函数使用示例
+- 📚 **examples/basic/main.go**：添加便利函数验证代码
+
+#### API一致性改进
+- ✅ **便利函数API**：
+  ```go
+  ultraLogger := logger.NewUltraFast()     // 返回 *UltraFastLogger
+  optimizedLogger := logger.NewOptimized() // 返回 *Logger (优化配置)
+  standardLogger := logger.New()           // 返回 *Logger (默认配置)
+  ```
+- ✅ **完整配置API**（保持不变）：
+  ```go
+  config := logger.DefaultConfig()
+  logger := logger.NewLogger(config)
+  ultraLogger := logger.NewUltraFastLogger(config)
+  ```
+
+#### 测试验证
+- 🧪 **examples/convenience/main.go**：完整的功能对比和性能特点演示
+- ✅ **examples/basic/main.go**：便利函数验证通过
+- ✅ **所有示例**：确保可运行且API调用正确
+
+### 📊 性能特征
+
+| 日志器类型 | 延迟 | 分配 | 功能完整度 | 便利函数 | 返回类型 |
+|-----------|------|------|-----------|----------|----------|
+| UltraFast | 7.56ns | 0 | ⭐⭐ | `NewUltraFast()` | `*UltraFastLogger` |
+| Optimized | 22.85ns | 1 | ⭐⭐⭐⭐ | `NewOptimized()` | `*Logger` |
+| Full | 130.1ns | 2 | ⭐⭐⭐⭐⭐ | `New()` | `*Logger` |
+
+### 🔧 升级指南
+此版本完全向下兼容，新增的便利函数提供更简洁的创建方式：
+
+```go
+// 新的便利函数（推荐）
+ultraLogger := logger.NewUltraFast()     // 极致性能
+optimizedLogger := logger.NewOptimized() // 平衡性能
+standardLogger := logger.New()           // 完整功能
+
+// 现有API继续可用
+config := logger.DefaultConfig()
+logger := logger.NewLogger(config)
+```
+
+---
+
 ## v1.4.0 (2025-11-22) - 🚀 重大架构重构
 
 ### 🌟 核心变更

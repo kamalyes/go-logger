@@ -565,3 +565,183 @@ func TestFormattingConsistency(t *testing.T) {
 			"Message should appear in output for level %s", lvl.name)
 	}
 }
+
+func TestNew(t *testing.T) {
+	// 测试New函数创建默认logger
+	log := New()
+	if log == nil {
+		t.Fatal("New() 应该返回非空的logger实例")
+	}
+
+	// 验证默认配置
+	config := log.GetConfig()
+	if config.Level != INFO {
+		t.Errorf("默认级别应该是INFO，实际是%v", config.Level)
+	}
+	
+	if config.ShowCaller != false {
+		t.Errorf("默认ShowCaller应该是false，实际是%v", config.ShowCaller)
+	}
+	
+	if config.Colorful != true {
+		t.Errorf("默认Colorful应该是true，实际是%v", config.Colorful)
+	}
+}
+
+func TestNewLogger(t *testing.T) {
+	// 测试NewLogger函数
+	config := NewLogConfig().
+		WithLevel(WARN).
+		WithPrefix("[TEST] ").
+		WithShowCaller(true)
+	
+	log := NewLogger(config)
+	if log == nil {
+		t.Fatal("NewLogger() 应该返回非空的logger实例")
+	}
+
+	// 验证配置
+	actualConfig := log.GetConfig()
+	if actualConfig.Level != WARN {
+		t.Errorf("级别应该是WARN，实际是%v", actualConfig.Level)
+	}
+	
+	if actualConfig.ShowCaller != true {
+		t.Errorf("ShowCaller应该是true，实际是%v", actualConfig.ShowCaller)
+	}
+	
+	if !strings.Contains(actualConfig.Prefix, "[TEST]") {
+		t.Errorf("前缀应该包含[TEST]，实际是%s", actualConfig.Prefix)
+	}
+}
+
+func TestNewLoggerWithNilConfig(t *testing.T) {
+	// 测试NewLogger传入nil配置
+	log := NewLogger(nil)
+	if log == nil {
+		t.Fatal("NewLogger(nil) 应该返回非空的logger实例")
+	}
+
+	// 应该使用默认配置
+	config := log.GetConfig()
+	if config.Level != INFO {
+		t.Errorf("nil配置时应该使用默认级别INFO，实际是%v", config.Level)
+	}
+}
+
+func TestLoggerChainMethods(t *testing.T) {
+	// 测试链式调用方法
+	log := New().
+		WithLevel(DEBUG).
+		WithPrefix("[CHAIN] ").
+		WithShowCaller(true).
+		WithColorful(false)
+	
+	if log == nil {
+		t.Fatal("链式调用应该返回非空的logger实例")
+	}
+
+	// 验证链式配置结果
+	config := log.GetConfig()
+	if config.Level != DEBUG {
+		t.Errorf("链式设置级别应该是DEBUG，实际是%v", config.Level)
+	}
+	
+	if config.ShowCaller != true {
+		t.Errorf("链式设置ShowCaller应该是true，实际是%v", config.ShowCaller)
+	}
+	
+	if config.Colorful != false {
+		t.Errorf("链式设置Colorful应该是false，实际是%v", config.Colorful)
+	}
+	
+	if !strings.Contains(config.Prefix, "[CHAIN]") {
+		t.Errorf("链式设置前缀应该包含[CHAIN]，实际是%s", config.Prefix)
+	}
+}
+
+func TestLoggerLevelCheck(t *testing.T) {
+	// 测试日志级别检查
+	log := New().WithLevel(WARN)
+	
+	if !log.IsLevelEnabled(WARN) {
+		t.Error("WARN级别应该被启用")
+	}
+	
+	if !log.IsLevelEnabled(ERROR) {
+		t.Error("ERROR级别应该被启用（高于WARN）")
+	}
+	
+	if log.IsLevelEnabled(INFO) {
+		t.Error("INFO级别不应该被启用（低于WARN）")
+	}
+	
+	if log.IsLevelEnabled(DEBUG) {
+		t.Error("DEBUG级别不应该被启用（低于WARN）")
+	}
+}
+
+func TestLoggerGetSetMethods(t *testing.T) {
+	log := New()
+	
+	// 测试SetLevel和GetLevel
+	log.SetLevel(ERROR)
+	if log.GetLevel() != ERROR {
+		t.Errorf("SetLevel/GetLevel: 期望ERROR，实际%v", log.GetLevel())
+	}
+	
+	// 测试SetShowCaller和IsShowCaller
+	log.SetShowCaller(true)
+	if !log.IsShowCaller() {
+		t.Error("SetShowCaller/IsShowCaller: 期望true，实际false")
+	}
+	
+	log.SetShowCaller(false)
+	if log.IsShowCaller() {
+		t.Error("SetShowCaller/IsShowCaller: 期望false，实际true")
+	}
+}
+
+func TestLoggerClone(t *testing.T) {
+	// 测试Clone方法
+	original := New().WithLevel(WARN).WithShowCaller(true)
+	cloned := original.Clone()
+	
+	if cloned == nil {
+		t.Fatal("Clone() 应该返回非空的logger实例")
+	}
+	
+	// 验证克隆的配置
+	originalConfig := original.GetConfig()
+	clonedConfig := cloned.(*Logger).GetConfig()
+	
+	if originalConfig.Level != clonedConfig.Level {
+		t.Errorf("克隆的级别不匹配：原始%v，克隆%v", originalConfig.Level, clonedConfig.Level)
+	}
+	
+	if originalConfig.ShowCaller != clonedConfig.ShowCaller {
+		t.Errorf("克隆的ShowCaller不匹配：原始%v，克隆%v", originalConfig.ShowCaller, clonedConfig.ShowCaller)
+	}
+}
+
+func BenchmarkNew(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = New()
+	}
+}
+
+func BenchmarkNewLogger(b *testing.B) {
+	config := DefaultConfig()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = NewLogger(config)
+	}
+}
+
+func BenchmarkChainMethods(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = New().WithLevel(DEBUG).WithPrefix("[BENCH] ").WithShowCaller(true)
+	}
+}

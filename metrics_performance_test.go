@@ -2,14 +2,14 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-09 10:30:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 10:31:25
- * @FilePath: \go-logger\metrics\performance_test.go
+ * @LastEditTime: 2025-11-22 12:30:13
+ * @FilePath: \go-logger\metrics_performance_test.go
  * @Description: 监控系统性能基准测试
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
 
-package metrics
+package logger
 
 import (
 	"runtime"
