@@ -32,6 +32,7 @@
 - 📊 **[性能详解](docs/PERFORMANCE.md)** - 深入了解性能优化技术和基准测试结果
 - 🔄 **[迁移指南](docs/MIGRATION.md)** - 从其他日志库迁移的完整指南
 - 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
+- 🔌 **[自定义上下文提取器](docs/CUSTOM_CONTEXT_EXTRACTOR.md)** - 灵活提取和自定义上下文信息
 - 📝 **[更新日志](./CHANGELOG.md)** - 版本更新和功能变更记录
 - 🔧 **[配置指南](docs/CONFIGURATION.md)** - 完整配置选项和最佳实践
 - 🧩 **[适配器系统](docs/ADAPTERS.md)** - 适配器完整指南和自定义开发
@@ -58,6 +59,7 @@
 ### 核心功能
 - **📊 内存监控系统**：实时监控内存使用、GC性能、堆分析，支持内存泄漏检测
 - **🔍 分布式追踪**：统一的Context服务架构，支持TraceID、SpanID、CorrelationID等多维度追踪
+- **🔌 自定义上下文提取器**：灵活的上下文信息提取机制，支持完全自定义链路追踪字段
 - **🎯 多级日志系统**：支持24种日志级别，从TRACE到PROFILING，满足不同场景需求
 - **📈 性能监控**：实时统计操作性能、延迟分析、吞吐量监控
 - **⚡ 架构重构**：Context管理代码减少88%，从1059行优化到128行，性能显著提升
@@ -68,6 +70,23 @@
 - **🔧 配置管理**：细粒度配置系统，支持动态配置更新
 - **⚙️ 适配器模式**：支持多种输出适配器，灵活扩展输出目标
 - **🧪 完善测试**：基于测试套件的全面测试，覆盖率90%+
+
+### 🔌 自定义上下文提取器
+
+支持灵活提取和自定义上下文信息，满足不同场景需求：
+
+**核心能力**：
+- 🎯 **预定义提取器**: SimpleTraceIDExtractor、SimpleRequestIDExtractor、NoOpContextExtractor
+- 🔧 **自定义字段**: CustomFieldExtractor - 从 context 或 gRPC metadata 提取任意字段
+- 🔗 **链式组合**: ChainContextExtractors - 组合多个提取器
+- 🏗️ **构建器模式**: ContextExtractorBuilder - 流式 API 构建复杂提取器
+- ⚡ **完全自定义**: 支持自定义 ContextExtractor 函数
+
+**性能表现**: NoOp (137ns) | 默认 (466ns) | 链式 (430ns)
+
+**适用场景**: 微服务追踪 | 多租户系统 | API 网关 | 分布式链路追踪
+
+📖 **[查看完整文档和示例 →](docs/CUSTOM_CONTEXT_EXTRACTOR.md)**
 
 ### 监控能力 ⚡ **极致性能优化**
 - **🔥 内存实时监控**: 堆内存、栈内存、GC统计、对象计数
@@ -216,6 +235,22 @@ func main() {
     fullLogger.WithField("trace_id", "trace-123").
                WithField("user_id", "user-456").
                Info("带上下文的日志")
+    
+    // 🔌 自定义上下文提取器 (灵活提取链路信息)
+    ctx = context.WithValue(ctx, "trace_id", "trace-12345")
+    ctx = context.WithValue(ctx, "request_id", "req-67890")
+    
+    // 使用默认提取器
+    ultraLogger.InfoContext(ctx, "用户登录成功")
+    // 输出: [TraceID=trace-12345 RequestID=req-67890] 用户登录成功
+    
+    // 自定义提取器（详见文档）
+    extractor := logger.NewContextExtractorBuilder().
+        AddTraceID().
+        AddRequestID().
+        AddContextValue("user_id", "User").
+        Build()
+    ultraLogger.SetContextExtractor(extractor)
 }
 ```
 

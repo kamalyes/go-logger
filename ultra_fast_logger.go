@@ -1,10 +1,10 @@
 /*
  * @Author: kamalyes 501893067@qq.com
- * @Date: 2025-11-09 16:00:00
+ * @Date: 2024-11-09 16:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 10:19:58
+ * @LastEditTime: 2024-11-24 10:19:58
  * @FilePath: \go-logger\ultra_fast_logger.go
- * @Description: 极致性能优化的日志实现
+ * @Description: 极致性能优化的日志实现 - 零拷贝、对象池、内联优化
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
@@ -13,6 +13,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"google.golang.org/grpc/metadata"
 	"io"
 	"os"
 	"strconv"
@@ -70,6 +71,10 @@ var levelPrefixesColor = map[LogLevel][]byte{
 	FATAL: fatalPrefixColor,
 }
 
+// ContextExtractor 上下文信息提取器函数类型
+// 用于从 context.Context 中提取自定义信息（如 TraceID、RequestID 等）
+type ContextExtractor func(ctx context.Context) string
+
 // UltraFastLogger 极致性能的日志器
 type UltraFastLogger struct {
 	level    LogLevel
@@ -80,6 +85,9 @@ type UltraFastLogger struct {
 	// 优化选项
 	skipTimestamp bool // 跳过时间戳以获得极致性能
 	skipCaller    bool // 跳过调用者信息
+
+	// 自定义上下文提取器
+	contextExtractor ContextExtractor // 可选的自定义上下文提取器
 }
 
 // NewUltraFastLogger 创建极致性能日志器
@@ -89,26 +97,30 @@ func NewUltraFastLogger(config *LogConfig) *UltraFastLogger {
 	}
 
 	return &UltraFastLogger{
-		level:         config.Level,
-		colorful:      config.Colorful,
-		output:        config.Output,
-		skipTimestamp: false, // 可配置
-		skipCaller:    !config.ShowCaller,
+		level:            config.Level,
+		colorful:         config.Colorful,
+		output:           config.Output,
+		skipTimestamp:    false, // 可配置
+		skipCaller:       !config.ShowCaller,
+		contextExtractor: defaultContextExtractor, // 使用默认提取器
 	}
 }
 
 // NewUltraFastLoggerNoTime 创建不包含时间戳的极致性能日志器
 func NewUltraFastLoggerNoTime(output io.Writer, level LogLevel) *UltraFastLogger {
 	return &UltraFastLogger{
-		level:         level,
-		colorful:      false,
-		output:        output,
-		skipTimestamp: true,
-		skipCaller:    true,
+		level:            level,
+		colorful:         false,
+		output:           output,
+		skipTimestamp:    true,
+		skipCaller:       true,
+		contextExtractor: defaultContextExtractor, // 使用默认提取器
 	}
 }
 
 // unsafeStringToBytes 零拷贝字符串到字节转换
+// 注意: 返回的字节切片不应被修改,因为它直接指向字符串的底层数据
+// go:inline
 func unsafeStringToBytes(s string) []byte {
 	return *(*[]byte)(unsafe.Pointer(&struct {
 		string
@@ -117,6 +129,8 @@ func unsafeStringToBytes(s string) []byte {
 }
 
 // unsafeBytesToString 零拷贝字节到字符串转换
+// 注意: 字节切片在转换后不应被修改
+// go:inline
 func unsafeBytesToString(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
@@ -228,20 +242,32 @@ func (l *UltraFastLogger) ultraLogf(level LogLevel, format string, args ...inter
 	l.ultraLog(level, msg)
 }
 
-// 实现 ILogger 接口
+// 实现 ILogger 接口 - 带级别检查优化
 func (l *UltraFastLogger) Debug(format string, args ...interface{}) {
+	if l.level > DEBUG {
+		return
+	}
 	l.ultraLogf(DEBUG, format, args...)
 }
 
 func (l *UltraFastLogger) Info(format string, args ...interface{}) {
+	if l.level > INFO {
+		return
+	}
 	l.ultraLogf(INFO, format, args...)
 }
 
 func (l *UltraFastLogger) Warn(format string, args ...interface{}) {
+	if l.level > WARN {
+		return
+	}
 	l.ultraLogf(WARN, format, args...)
 }
 
 func (l *UltraFastLogger) Error(format string, args ...interface{}) {
+	if l.level > ERROR {
+		return
+	}
 	l.ultraLogf(ERROR, format, args...)
 }
 
@@ -249,20 +275,32 @@ func (l *UltraFastLogger) Fatal(format string, args ...interface{}) {
 	l.ultraLogf(FATAL, format, args...)
 }
 
-// Printf风格方法（与上面相同，但命名更明确）
+// Printf风格方法（与上面相同，但命名更明确） - 带级别检查优化
 func (l *UltraFastLogger) Debugf(format string, args ...interface{}) {
+	if l.level > DEBUG {
+		return
+	}
 	l.ultraLogf(DEBUG, format, args...)
 }
 
 func (l *UltraFastLogger) Infof(format string, args ...interface{}) {
+	if l.level > INFO {
+		return
+	}
 	l.ultraLogf(INFO, format, args...)
 }
 
 func (l *UltraFastLogger) Warnf(format string, args ...interface{}) {
+	if l.level > WARN {
+		return
+	}
 	l.ultraLogf(WARN, format, args...)
 }
 
 func (l *UltraFastLogger) Errorf(format string, args ...interface{}) {
+	if l.level > ERROR {
+		return
+	}
 	l.ultraLogf(ERROR, format, args...)
 }
 
@@ -270,20 +308,32 @@ func (l *UltraFastLogger) Fatalf(format string, args ...interface{}) {
 	l.ultraLogf(FATAL, format, args...)
 }
 
-// 纯文本日志方法
+// 纯文本日志方法 - 带级别检查优化
 func (l *UltraFastLogger) DebugMsg(msg string) {
+	if l.level > DEBUG {
+		return
+	}
 	l.ultraLog(DEBUG, msg)
 }
 
 func (l *UltraFastLogger) InfoMsg(msg string) {
+	if l.level > INFO {
+		return
+	}
 	l.ultraLog(INFO, msg)
 }
 
 func (l *UltraFastLogger) WarnMsg(msg string) {
+	if l.level > WARN {
+		return
+	}
 	l.ultraLog(WARN, msg)
 }
 
 func (l *UltraFastLogger) ErrorMsg(msg string) {
+	if l.level > ERROR {
+		return
+	}
 	l.ultraLog(ERROR, msg)
 }
 
@@ -310,6 +360,35 @@ func (l *UltraFastLogger) IsShowCaller() bool {
 
 func (l *UltraFastLogger) IsLevelEnabled(level LogLevel) bool {
 	return level >= l.level
+}
+
+// SetContextExtractor 设置自定义上下文提取器
+// extractor: 自定义的上下文信息提取函数，如果为 nil 则使用默认提取器
+func (l *UltraFastLogger) SetContextExtractor(extractor ContextExtractor) {
+	if extractor == nil {
+		l.contextExtractor = defaultContextExtractor
+	} else {
+		l.contextExtractor = extractor
+	}
+}
+
+// GetContextExtractor 获取当前的上下文提取器
+func (l *UltraFastLogger) GetContextExtractor() ContextExtractor {
+	if l.contextExtractor == nil {
+		return defaultContextExtractor
+	}
+	return l.contextExtractor
+}
+
+// extractContextInfo 从上下文中提取信息（使用配置的提取器）
+func (l *UltraFastLogger) extractContextInfo(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if l.contextExtractor == nil {
+		return defaultContextExtractor(ctx)
+	}
+	return l.contextExtractor(ctx)
 }
 
 // 日志条目方法
@@ -376,24 +455,114 @@ func (l *UltraFastLogger) Println(v ...interface{}) {
 	l.ultraLog(INFO, msg[:len(msg)-1]) // 移除额外的换行符
 }
 
-// 上下文方法（简化版，忽略上下文以保持性能）
+// defaultContextExtractor 默认的上下文信息提取器
+// 从 context.Context 中提取 TraceID 和 RequestID
+func defaultContextExtractor(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+
+	var traceID, requestID string
+
+	// 1. 尝试从 context.Value 获取
+	if tid, ok := ctx.Value("trace_id").(string); ok && tid != "" {
+		traceID = tid
+	}
+	if rid, ok := ctx.Value("request_id").(string); ok && rid != "" {
+		requestID = rid
+	}
+
+	// 2. 如果还没找到，尝试从 gRPC metadata 获取
+	if traceID == "" || requestID == "" {
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if traceID == "" {
+				if values := md.Get("x-trace-id"); len(values) > 0 {
+					traceID = values[0]
+				}
+			}
+			if requestID == "" {
+				if values := md.Get("x-request-id"); len(values) > 0 {
+					requestID = values[0]
+				}
+			}
+		}
+	}
+
+	// 3. 构建前缀 - 使用字节池优化
+	if traceID != "" || requestID != "" {
+		buf := bytePool.Get().([]byte)
+		buf = buf[:0]
+		defer bytePool.Put(buf)
+
+		buf = append(buf, '[')
+		if traceID != "" {
+			buf = append(buf, "TraceID="...)
+			buf = append(buf, unsafeStringToBytes(traceID)...)
+		}
+		if requestID != "" {
+			if traceID != "" {
+				buf = append(buf, ' ')
+			}
+			buf = append(buf, "RequestID="...)
+			buf = append(buf, unsafeStringToBytes(requestID)...)
+		}
+		buf = append(buf, ']', ' ')
+		return string(buf) // 这里需要复制,因为buf会被回收
+	}
+
+	return ""
+}
+
+// 上下文方法（自动提取 TraceID 和 RequestID）- 优化版本
 func (l *UltraFastLogger) DebugContext(ctx context.Context, format string, args ...interface{}) {
+	if l.level > DEBUG {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
 	l.ultraLogf(DEBUG, format, args...)
 }
 
 func (l *UltraFastLogger) InfoContext(ctx context.Context, format string, args ...interface{}) {
+	if l.level > INFO {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
 	l.ultraLogf(INFO, format, args...)
 }
 
 func (l *UltraFastLogger) WarnContext(ctx context.Context, format string, args ...interface{}) {
+	if l.level > WARN {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
 	l.ultraLogf(WARN, format, args...)
 }
 
 func (l *UltraFastLogger) ErrorContext(ctx context.Context, format string, args ...interface{}) {
+	if l.level > ERROR {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
 	l.ultraLogf(ERROR, format, args...)
 }
 
 func (l *UltraFastLogger) FatalContext(ctx context.Context, format string, args ...interface{}) {
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
 	l.ultraLogf(FATAL, format, args...)
 }
 
@@ -437,7 +606,7 @@ func (l *UltraFastLogger) LogKV(level LogLevel, msg string, keysAndValues ...int
 	l.logWithKV(level, msg, keysAndValues...)
 }
 
-// logWithKV 极简键值对实现
+// logWithKV 极简键值对实现 - 零分配优化
 func (l *UltraFastLogger) logWithKV(level LogLevel, msg string, keysAndValues ...interface{}) {
 	if len(keysAndValues) == 0 {
 		l.ultraLog(level, msg)
@@ -466,12 +635,16 @@ func (l *UltraFastLogger) logWithKV(level LogLevel, msg string, keysAndValues ..
 		if i+1 < len(keysAndValues) {
 			val := fmt.Sprint(keysAndValues[i+1])
 			buf = append(buf, unsafeStringToBytes(val)...)
+		} else {
+			// 奇数个参数,最后一个键没有值
+			buf = append(buf, "<missing>"...)
 		}
 	}
 
 	buf = append(buf, '}')
 
-	l.ultraLog(level, unsafeBytesToString(buf))
+	// 注意: 这里必须复制字符串,因为buf会被回收
+	l.ultraLog(level, string(buf))
 }
 
 // 字段方法返回简化的包装器
@@ -493,11 +666,12 @@ func (l *UltraFastLogger) WithContext(ctx context.Context) ILogger {
 
 func (l *UltraFastLogger) Clone() ILogger {
 	return &UltraFastLogger{
-		level:         l.level,
-		colorful:      l.colorful,
-		output:        l.output,
-		skipTimestamp: l.skipTimestamp,
-		skipCaller:    l.skipCaller,
+		level:            l.level,
+		colorful:         l.colorful,
+		output:           l.output,
+		skipTimestamp:    l.skipTimestamp,
+		skipCaller:       l.skipCaller,
+		contextExtractor: l.contextExtractor, // 复制上下文提取器
 	}
 }
 
@@ -688,20 +862,56 @@ func (f *ultraFieldLogger) Print(v ...interface{})                 { f.logger.Pr
 func (f *ultraFieldLogger) Printf(format string, v ...interface{}) { f.logger.Printf(format, v...) }
 func (f *ultraFieldLogger) Println(v ...interface{})               { f.logger.Println(v...) }
 
+// 上下文方法优化版本
 func (f *ultraFieldLogger) DebugContext(ctx context.Context, format string, args ...interface{}) {
-	f.logger.DebugContext(ctx, format, args...)
+	// 尝试从基础 logger 提取上下文信息
+	if ultraLogger, ok := f.logger.(*UltraFastLogger); ok {
+		contextInfo := ultraLogger.extractContextInfo(ctx)
+		if contextInfo != "" {
+			format = contextInfo + format
+		}
+	}
+	f.logWithFields(DEBUG, format, args...)
 }
+
 func (f *ultraFieldLogger) InfoContext(ctx context.Context, format string, args ...interface{}) {
-	f.logger.InfoContext(ctx, format, args...)
+	if ultraLogger, ok := f.logger.(*UltraFastLogger); ok {
+		contextInfo := ultraLogger.extractContextInfo(ctx)
+		if contextInfo != "" {
+			format = contextInfo + format
+		}
+	}
+	f.logWithFields(INFO, format, args...)
 }
+
 func (f *ultraFieldLogger) WarnContext(ctx context.Context, format string, args ...interface{}) {
-	f.logger.WarnContext(ctx, format, args...)
+	if ultraLogger, ok := f.logger.(*UltraFastLogger); ok {
+		contextInfo := ultraLogger.extractContextInfo(ctx)
+		if contextInfo != "" {
+			format = contextInfo + format
+		}
+	}
+	f.logWithFields(WARN, format, args...)
 }
+
 func (f *ultraFieldLogger) ErrorContext(ctx context.Context, format string, args ...interface{}) {
-	f.logger.ErrorContext(ctx, format, args...)
+	if ultraLogger, ok := f.logger.(*UltraFastLogger); ok {
+		contextInfo := ultraLogger.extractContextInfo(ctx)
+		if contextInfo != "" {
+			format = contextInfo + format
+		}
+	}
+	f.logWithFields(ERROR, format, args...)
 }
+
 func (f *ultraFieldLogger) FatalContext(ctx context.Context, format string, args ...interface{}) {
-	f.logger.FatalContext(ctx, format, args...)
+	if ultraLogger, ok := f.logger.(*UltraFastLogger); ok {
+		contextInfo := ultraLogger.extractContextInfo(ctx)
+		if contextInfo != "" {
+			format = contextInfo + format
+		}
+	}
+	f.logWithFields(FATAL, format, args...)
 }
 
 func (f *ultraFieldLogger) DebugKV(msg string, keysAndValues ...interface{}) {

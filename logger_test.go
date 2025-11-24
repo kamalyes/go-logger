@@ -14,13 +14,12 @@ package logger
 import (
 	"bytes"
 	"errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
 // LoggerTestSuite 核心日志器测试套件
@@ -212,7 +211,7 @@ func (suite *LoggerTestSuite) TestLoggerCallerInfo() {
 
 	suite.logger.Info("Test message with caller")
 	output := suite.buffer.String()
-	
+
 	// 应该包含文件名和行号信息
 	assert.Contains(suite.T(), output, ".go:")
 	assert.Contains(suite.T(), output, "Test message with caller")
@@ -385,14 +384,14 @@ func (suite *LoggerTestSuite) TestLoggerConcurrency() {
 func (suite *LoggerTestSuite) TestLoggerEdgeCases() {
 	// 测试空消息
 	suite.buffer.Reset()
-	suite.logger.Info("")
+	suite.logger.Info("%s", "")
 	output := suite.buffer.String()
 	assert.Contains(suite.T(), output, "INFO")
 
 	// 测试很长的消息
 	longMessage := strings.Repeat("A", 10000)
 	suite.buffer.Reset()
-	suite.logger.Info(longMessage)
+	suite.logger.Info("%s", longMessage)
 	output = suite.buffer.String()
 	assert.Contains(suite.T(), output, longMessage)
 
@@ -413,7 +412,7 @@ func (suite *LoggerTestSuite) TestLoggerWithInvalidLevel() {
 	suite.buffer.Reset()
 	suite.logger.Info("Test with invalid level")
 	output := suite.buffer.String()
-	
+
 	// 测试无效级别时的处理 - 应该是空的，因为999比INFO(1)级别高很多
 	if output == "" {
 		// 这是期望的行为 - 高级别会过滤低级别日志
@@ -546,7 +545,7 @@ func TestFormattingConsistency(t *testing.T) {
 
 	for _, lvl := range levels {
 		buffer.Reset()
-		
+
 		switch lvl.level {
 		case DEBUG:
 			logger.Debug("Test message")
@@ -559,9 +558,9 @@ func TestFormattingConsistency(t *testing.T) {
 		}
 
 		output := buffer.String()
-		assert.Contains(t, output, lvl.name, 
+		assert.Contains(t, output, lvl.name,
 			"Level %s should appear in output", lvl.name)
-		assert.Contains(t, output, "Test message", 
+		assert.Contains(t, output, "Test message",
 			"Message should appear in output for level %s", lvl.name)
 	}
 }
@@ -578,11 +577,11 @@ func TestNew(t *testing.T) {
 	if config.Level != INFO {
 		t.Errorf("默认级别应该是INFO，实际是%v", config.Level)
 	}
-	
+
 	if config.ShowCaller != false {
 		t.Errorf("默认ShowCaller应该是false，实际是%v", config.ShowCaller)
 	}
-	
+
 	if config.Colorful != true {
 		t.Errorf("默认Colorful应该是true，实际是%v", config.Colorful)
 	}
@@ -594,7 +593,7 @@ func TestNewLogger(t *testing.T) {
 		WithLevel(WARN).
 		WithPrefix("[TEST] ").
 		WithShowCaller(true)
-	
+
 	log := NewLogger(config)
 	if log == nil {
 		t.Fatal("NewLogger() 应该返回非空的logger实例")
@@ -605,11 +604,11 @@ func TestNewLogger(t *testing.T) {
 	if actualConfig.Level != WARN {
 		t.Errorf("级别应该是WARN，实际是%v", actualConfig.Level)
 	}
-	
+
 	if actualConfig.ShowCaller != true {
 		t.Errorf("ShowCaller应该是true，实际是%v", actualConfig.ShowCaller)
 	}
-	
+
 	if !strings.Contains(actualConfig.Prefix, "[TEST]") {
 		t.Errorf("前缀应该包含[TEST]，实际是%s", actualConfig.Prefix)
 	}
@@ -636,7 +635,7 @@ func TestLoggerChainMethods(t *testing.T) {
 		WithPrefix("[CHAIN] ").
 		WithShowCaller(true).
 		WithColorful(false)
-	
+
 	if log == nil {
 		t.Fatal("链式调用应该返回非空的logger实例")
 	}
@@ -646,15 +645,15 @@ func TestLoggerChainMethods(t *testing.T) {
 	if config.Level != DEBUG {
 		t.Errorf("链式设置级别应该是DEBUG，实际是%v", config.Level)
 	}
-	
+
 	if config.ShowCaller != true {
 		t.Errorf("链式设置ShowCaller应该是true，实际是%v", config.ShowCaller)
 	}
-	
+
 	if config.Colorful != false {
 		t.Errorf("链式设置Colorful应该是false，实际是%v", config.Colorful)
 	}
-	
+
 	if !strings.Contains(config.Prefix, "[CHAIN]") {
 		t.Errorf("链式设置前缀应该包含[CHAIN]，实际是%s", config.Prefix)
 	}
@@ -663,19 +662,19 @@ func TestLoggerChainMethods(t *testing.T) {
 func TestLoggerLevelCheck(t *testing.T) {
 	// 测试日志级别检查
 	log := New().WithLevel(WARN)
-	
+
 	if !log.IsLevelEnabled(WARN) {
 		t.Error("WARN级别应该被启用")
 	}
-	
+
 	if !log.IsLevelEnabled(ERROR) {
 		t.Error("ERROR级别应该被启用（高于WARN）")
 	}
-	
+
 	if log.IsLevelEnabled(INFO) {
 		t.Error("INFO级别不应该被启用（低于WARN）")
 	}
-	
+
 	if log.IsLevelEnabled(DEBUG) {
 		t.Error("DEBUG级别不应该被启用（低于WARN）")
 	}
@@ -683,19 +682,19 @@ func TestLoggerLevelCheck(t *testing.T) {
 
 func TestLoggerGetSetMethods(t *testing.T) {
 	log := New()
-	
+
 	// 测试SetLevel和GetLevel
 	log.SetLevel(ERROR)
 	if log.GetLevel() != ERROR {
 		t.Errorf("SetLevel/GetLevel: 期望ERROR，实际%v", log.GetLevel())
 	}
-	
+
 	// 测试SetShowCaller和IsShowCaller
 	log.SetShowCaller(true)
 	if !log.IsShowCaller() {
 		t.Error("SetShowCaller/IsShowCaller: 期望true，实际false")
 	}
-	
+
 	log.SetShowCaller(false)
 	if log.IsShowCaller() {
 		t.Error("SetShowCaller/IsShowCaller: 期望false，实际true")
@@ -706,19 +705,19 @@ func TestLoggerClone(t *testing.T) {
 	// 测试Clone方法
 	original := New().WithLevel(WARN).WithShowCaller(true)
 	cloned := original.Clone()
-	
+
 	if cloned == nil {
 		t.Fatal("Clone() 应该返回非空的logger实例")
 	}
-	
+
 	// 验证克隆的配置
 	originalConfig := original.GetConfig()
 	clonedConfig := cloned.(*Logger).GetConfig()
-	
+
 	if originalConfig.Level != clonedConfig.Level {
 		t.Errorf("克隆的级别不匹配：原始%v，克隆%v", originalConfig.Level, clonedConfig.Level)
 	}
-	
+
 	if originalConfig.ShowCaller != clonedConfig.ShowCaller {
 		t.Errorf("克隆的ShowCaller不匹配：原始%v，克隆%v", originalConfig.ShowCaller, clonedConfig.ShowCaller)
 	}
