@@ -11,7 +11,7 @@ require golang.org/x/sys v0.37.0 // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/kamalyes/go-toolbox v0.11.77
+	github.com/kamalyes/go-toolbox v0.11.79
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
