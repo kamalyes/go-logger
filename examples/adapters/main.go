@@ -629,11 +629,11 @@ func (a *MemoryAdapter) Errorf(format string, args ...interface{}) { a.Error(for
 func (a *MemoryAdapter) Fatalf(format string, args ...interface{}) { a.Fatal(format, args...) }
 
 // 其他必需方法的空实现
-func (a *MemoryAdapter) DebugMsg(msg string)                       { a.Debug(msg) }
-func (a *MemoryAdapter) InfoMsg(msg string)                        { a.Info(msg) }
-func (a *MemoryAdapter) WarnMsg(msg string)                        { a.Warn(msg) }
-func (a *MemoryAdapter) ErrorMsg(msg string)                       { a.Error(msg) }
-func (a *MemoryAdapter) FatalMsg(msg string)                       { a.Fatal(msg) }
+func (a *MemoryAdapter) DebugMsg(msg string)                       { a.Debug("%s", msg) }
+func (a *MemoryAdapter) InfoMsg(msg string)                        { a.Info("%s", msg) }
+func (a *MemoryAdapter) WarnMsg(msg string)                        { a.Warn("%s", msg) }
+func (a *MemoryAdapter) ErrorMsg(msg string)                       { a.Error("%s", msg) }
+func (a *MemoryAdapter) FatalMsg(msg string)                       { a.Fatal("%s", msg) }
 func (a *MemoryAdapter) Print(args ...interface{})                 {}
 func (a *MemoryAdapter) Printf(format string, args ...interface{}) {}
 func (a *MemoryAdapter) Println(args ...interface{})               {}
@@ -657,14 +657,14 @@ func (a *MemoryAdapter) FatalContext(ctx context.Context, format string, args ..
 func (a *MemoryAdapter) WithContext(ctx context.Context) logger.ILogger { return a }
 
 // 空实现的KV方法
-func (a *MemoryAdapter) DebugKV(msg string, keysAndValues ...interface{}) { a.Debug(msg) }
-func (a *MemoryAdapter) InfoKV(msg string, keysAndValues ...interface{})  { a.Info(msg) }
-func (a *MemoryAdapter) WarnKV(msg string, keysAndValues ...interface{})  { a.Warn(msg) }
-func (a *MemoryAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { a.Error(msg) }
-func (a *MemoryAdapter) FatalKV(msg string, keysAndValues ...interface{}) { a.Fatal(msg) }
+func (a *MemoryAdapter) DebugKV(msg string, keysAndValues ...interface{}) { a.Debug("%s", msg) }
+func (a *MemoryAdapter) InfoKV(msg string, keysAndValues ...interface{})  { a.Info("%s", msg) }
+func (a *MemoryAdapter) WarnKV(msg string, keysAndValues ...interface{})  { a.Warn("%s", msg) }
+func (a *MemoryAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { a.Error("%s", msg) }
+func (a *MemoryAdapter) FatalKV(msg string, keysAndValues ...interface{}) { a.Fatal("%s", msg) }
 
 // 空实现的原始日志方法
-func (a *MemoryAdapter) Log(level logger.LogLevel, msg string) { a.logMessage(level, msg) }
+func (a *MemoryAdapter) Log(level logger.LogLevel, msg string) { a.logMessage(level, "%s", msg) }
 func (a *MemoryAdapter) LogContext(ctx context.Context, level logger.LogLevel, msg string) {
 	a.Log(level, msg)
 }
@@ -673,6 +673,31 @@ func (a *MemoryAdapter) LogKV(level logger.LogLevel, msg string, keysAndValues .
 }
 func (a *MemoryAdapter) LogWithFields(level logger.LogLevel, msg string, fields map[string]interface{}) {
 	a.Log(level, msg)
+}
+
+// 多行日志方法实现
+func (a *MemoryAdapter) DebugLines(lines ...string) {
+	for _, line := range lines {
+		a.Debug("%s", line)
+	}
+}
+
+func (a *MemoryAdapter) InfoLines(lines ...string) {
+	for _, line := range lines {
+		a.Info("%s", line)
+	}
+}
+
+func (a *MemoryAdapter) WarnLines(lines ...string) {
+	for _, line := range lines {
+		a.Warn("%s", line)
+	}
+}
+
+func (a *MemoryAdapter) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		a.Error("%s", line)
+	}
 }
 
 // GetLogs 获取缓存的日志
@@ -815,6 +840,31 @@ func (f *FilterAdapter) LogKV(level logger.LogLevel, msg string, keysAndValues .
 }
 func (f *FilterAdapter) LogWithFields(level logger.LogLevel, msg string, fields map[string]interface{}) {
 	f.Log(level, msg)
+}
+
+// 多行日志方法实现
+func (f *FilterAdapter) DebugLines(lines ...string) {
+	for _, line := range lines {
+		f.Debug("%s", line)
+	}
+}
+
+func (f *FilterAdapter) InfoLines(lines ...string) {
+	for _, line := range lines {
+		f.Info("%s", line)
+	}
+}
+
+func (f *FilterAdapter) WarnLines(lines ...string) {
+	for _, line := range lines {
+		f.Warn("%s", line)
+	}
+}
+
+func (f *FilterAdapter) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		f.Error("%s", line)
+	}
 }
 
 // StatsAdapter - 统计适配器
@@ -965,4 +1015,29 @@ func (s *StatsAdapter) LogKV(level logger.LogLevel, msg string, keysAndValues ..
 }
 func (s *StatsAdapter) LogWithFields(level logger.LogLevel, msg string, fields map[string]interface{}) {
 	s.Log(level, msg)
+}
+
+// 多行日志方法实现
+func (s *StatsAdapter) DebugLines(lines ...string) {
+	for _, line := range lines {
+		s.Debug("%s", line)
+	}
+}
+
+func (s *StatsAdapter) InfoLines(lines ...string) {
+	for _, line := range lines {
+		s.Info("%s", line)
+	}
+}
+
+func (s *StatsAdapter) WarnLines(lines ...string) {
+	for _, line := range lines {
+		s.Warn("%s", line)
+	}
+}
+
+func (s *StatsAdapter) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		s.Error("%s", line)
+	}
 }

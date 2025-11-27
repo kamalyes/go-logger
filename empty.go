@@ -60,6 +60,12 @@ func (e *EmptyLogger) WarnMsg(msg string)  {}
 func (e *EmptyLogger) ErrorMsg(msg string) {}
 func (e *EmptyLogger) FatalMsg(msg string) {}
 
+// 多行日志方法
+func (e *EmptyLogger) InfoLines(lines ...string)  {}
+func (e *EmptyLogger) ErrorLines(lines ...string) {}
+func (e *EmptyLogger) WarnLines(lines ...string)  {}
+func (e *EmptyLogger) DebugLines(lines ...string) {}
+
 // 带上下文的日志方法
 func (e *EmptyLogger) DebugContext(ctx context.Context, format string, args ...interface{}) {}
 func (e *EmptyLogger) InfoContext(ctx context.Context, format string, args ...interface{})  {}

@@ -16,13 +16,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"os"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 )
 
 // AdapterTestSuite 适配器测试套件
@@ -655,6 +654,12 @@ func (m *MockAdapter) Log(level LogLevel, msg string)                           
 func (m *MockAdapter) LogContext(ctx context.Context, level LogLevel, msg string)              {}
 func (m *MockAdapter) LogKV(level LogLevel, msg string, keysAndValues ...interface{})          {}
 func (m *MockAdapter) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {}
+
+// 多行日志方法
+func (m *MockAdapter) DebugLines(lines ...string) {}
+func (m *MockAdapter) InfoLines(lines ...string)  {}
+func (m *MockAdapter) WarnLines(lines ...string)  {}
+func (m *MockAdapter) ErrorLines(lines ...string) {}
 
 // WithContext 的实现
 func (m *MockAdapter) WithContext(ctx context.Context) ILogger {

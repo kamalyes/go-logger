@@ -420,6 +420,31 @@ func (l *Logger) FatalMsg(msg string) {
 	l.Fatal("%s", msg)
 }
 
+// 多行日志方法 - 自动处理换行符
+func (l *Logger) InfoLines(lines ...string) {
+	for _, line := range lines {
+		l.Info("%s", line)
+	}
+}
+
+func (l *Logger) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		l.Error("%s", line)
+	}
+}
+
+func (l *Logger) WarnLines(lines ...string) {
+	for _, line := range lines {
+		l.Warn("%s", line)
+	}
+}
+
+func (l *Logger) DebugLines(lines ...string) {
+	for _, line := range lines {
+		l.Debug("%s", line)
+	}
+}
+
 // 带上下文的日志方法
 func (l *Logger) DebugContext(ctx context.Context, format string, args ...interface{}) {
 	// 目前忽略context，委托给基础方法

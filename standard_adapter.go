@@ -308,6 +308,31 @@ func (s *StandardLoggerAdapter) FatalMsg(msg string) {
 	}
 }
 
+// 多行日志方法
+func (s *StandardLoggerAdapter) InfoLines(lines ...string) {
+	if s.healthy {
+		s.logger.InfoLines(lines...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorLines(lines ...string) {
+	if s.healthy {
+		s.logger.ErrorLines(lines...)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnLines(lines ...string) {
+	if s.healthy {
+		s.logger.WarnLines(lines...)
+	}
+}
+
+func (s *StandardLoggerAdapter) DebugLines(lines ...string) {
+	if s.healthy {
+		s.logger.DebugLines(lines...)
+	}
+}
+
 // 带上下文的日志方法
 func (s *StandardLoggerAdapter) DebugContext(ctx context.Context, format string, args ...interface{}) {
 	if s.healthy {

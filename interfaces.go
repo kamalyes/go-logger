@@ -52,6 +52,12 @@ type ILogger interface {
 	ErrorKV(msg string, keysAndValues ...interface{})
 	FatalKV(msg string, keysAndValues ...interface{})
 
+	// 多行日志方法（自动处理多行格式）
+	InfoLines(lines ...string)
+	ErrorLines(lines ...string)
+	WarnLines(lines ...string)
+	DebugLines(lines ...string)
+
 	// 原始日志条目方法（最灵活）
 	Log(level LogLevel, msg string)
 	LogContext(ctx context.Context, level LogLevel, msg string)

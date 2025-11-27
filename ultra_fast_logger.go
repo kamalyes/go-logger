@@ -341,6 +341,43 @@ func (l *UltraFastLogger) FatalMsg(msg string) {
 	l.ultraLog(FATAL, msg)
 }
 
+// 多行日志方法
+func (l *UltraFastLogger) InfoLines(lines ...string) {
+	if l.level > INFO {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(INFO, line)
+	}
+}
+
+func (l *UltraFastLogger) ErrorLines(lines ...string) {
+	if l.level > ERROR {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(ERROR, line)
+	}
+}
+
+func (l *UltraFastLogger) WarnLines(lines ...string) {
+	if l.level > WARN {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(WARN, line)
+	}
+}
+
+func (l *UltraFastLogger) DebugLines(lines ...string) {
+	if l.level > DEBUG {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(DEBUG, line)
+	}
+}
+
 // 配置方法
 func (l *UltraFastLogger) SetLevel(level LogLevel) {
 	l.level = level
@@ -806,6 +843,31 @@ func (f *ultraFieldLogger) logWithFieldsMsg(level LogLevel, msg string) {
 		f.logger.ErrorMsg(msg)
 	case FATAL:
 		f.logger.FatalMsg(msg)
+	}
+}
+
+// 多行日志方法
+func (f *ultraFieldLogger) InfoLines(lines ...string) {
+	for _, line := range lines {
+		f.logWithFieldsMsg(INFO, line)
+	}
+}
+
+func (f *ultraFieldLogger) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		f.logWithFieldsMsg(ERROR, line)
+	}
+}
+
+func (f *ultraFieldLogger) WarnLines(lines ...string) {
+	for _, line := range lines {
+		f.logWithFieldsMsg(WARN, line)
+	}
+}
+
+func (f *ultraFieldLogger) DebugLines(lines ...string) {
+	for _, line := range lines {
+		f.logWithFieldsMsg(DEBUG, line)
 	}
 }
 

@@ -14,13 +14,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/kamalyes/go-logger"
 	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kamalyes/go-logger"
 )
 
 // 监控指标
@@ -211,6 +212,31 @@ func (m *MonitoringAdapter) LogKV(level logger.LogLevel, msg string, keysAndValu
 }
 func (m *MonitoringAdapter) LogWithFields(level logger.LogLevel, msg string, fields map[string]interface{}) {
 	m.Log(level, msg)
+}
+
+// 多行日志方法
+func (m *MonitoringAdapter) DebugLines(lines ...string) {
+	for _, line := range lines {
+		m.Debug("%s", line)
+	}
+}
+
+func (m *MonitoringAdapter) InfoLines(lines ...string) {
+	for _, line := range lines {
+		m.Info("%s", line)
+	}
+}
+
+func (m *MonitoringAdapter) WarnLines(lines ...string) {
+	for _, line := range lines {
+		m.Warn("%s", line)
+	}
+}
+
+func (m *MonitoringAdapter) ErrorLines(lines ...string) {
+	for _, line := range lines {
+		m.Error("%s", line)
+	}
 }
 
 func main() {
