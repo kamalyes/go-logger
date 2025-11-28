@@ -1,7 +1,7 @@
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/kamalyes/go-toolbox v0.11.77 h1:sngPdA/ny4zuDQOgKJO69FYwwFJeCAbwicxhII6i9Vk=
-github.com/kamalyes/go-toolbox v0.11.77/go.mod h1:DmXSId0yjUQ7vK08/pBwhwiiYH5UN3cChxMWogUtVfI=
+github.com/kamalyes/go-toolbox v0.11.80 h1:mc4bwOduG4WoNLWFjIo+WtDNXQbPKW20ABeWsVaEv68=
+github.com/kamalyes/go-toolbox v0.11.80/go.mod h1:DmXSId0yjUQ7vK08/pBwhwiiYH5UN3cChxMWogUtVfI=
 github.com/kr/pretty v0.2.0 h1:s5hAObm+yFO5uHYt5dYjxi2rXrsnmRpJx4OYvIWUaQs=
 github.com/kr/pretty v0.2.0/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
