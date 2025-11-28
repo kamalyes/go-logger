@@ -52,6 +52,13 @@ type ILogger interface {
 	ErrorKV(msg string, keysAndValues ...interface{})
 	FatalKV(msg string, keysAndValues ...interface{})
 
+	// 带上下文的结构化日志方法（键值对）
+	DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
+	InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
+	WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
+	ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
+	FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
+
 	// 多行日志方法（自动处理多行格式）
 	InfoLines(lines ...string)
 	ErrorLines(lines ...string)

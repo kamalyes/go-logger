@@ -663,6 +663,23 @@ func (a *MemoryAdapter) WarnKV(msg string, keysAndValues ...interface{})  { a.Wa
 func (a *MemoryAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { a.Error("%s", msg) }
 func (a *MemoryAdapter) FatalKV(msg string, keysAndValues ...interface{}) { a.Fatal("%s", msg) }
 
+// 空实现的ContextKV方法
+func (a *MemoryAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	a.Debug("%s", msg)
+}
+func (a *MemoryAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	a.Info("%s", msg)
+}
+func (a *MemoryAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	a.Warn("%s", msg)
+}
+func (a *MemoryAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	a.Error("%s", msg)
+}
+func (a *MemoryAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	a.Fatal("%s", msg)
+}
+
 // 空实现的原始日志方法
 func (a *MemoryAdapter) Log(level logger.LogLevel, msg string) { a.logMessage(level, "%s", msg) }
 func (a *MemoryAdapter) LogContext(ctx context.Context, level logger.LogLevel, msg string) {
@@ -818,6 +835,21 @@ func (f *FilterAdapter) InfoKV(msg string, keysAndValues ...interface{})  { f.In
 func (f *FilterAdapter) WarnKV(msg string, keysAndValues ...interface{})  { f.Warn(msg) }
 func (f *FilterAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { f.Error(msg) }
 func (f *FilterAdapter) FatalKV(msg string, keysAndValues ...interface{}) { f.Fatal(msg) }
+func (f *FilterAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	f.Debug(msg)
+}
+func (f *FilterAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	f.Info(msg)
+}
+func (f *FilterAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	f.Warn(msg)
+}
+func (f *FilterAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	f.Error(msg)
+}
+func (f *FilterAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	f.Fatal(msg)
+}
 func (f *FilterAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:
@@ -993,6 +1025,21 @@ func (s *StatsAdapter) InfoKV(msg string, keysAndValues ...interface{})  { s.Inf
 func (s *StatsAdapter) WarnKV(msg string, keysAndValues ...interface{})  { s.Warn(msg) }
 func (s *StatsAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { s.Error(msg) }
 func (s *StatsAdapter) FatalKV(msg string, keysAndValues ...interface{}) { s.Fatal(msg) }
+func (s *StatsAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	s.Debug(msg)
+}
+func (s *StatsAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	s.Info(msg)
+}
+func (s *StatsAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	s.Warn(msg)
+}
+func (s *StatsAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	s.Error(msg)
+}
+func (s *StatsAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	s.Fatal(msg)
+}
 func (s *StatsAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:

@@ -395,6 +395,37 @@ func (s *StandardLoggerAdapter) FatalKV(msg string, keysAndValues ...interface{}
 	}
 }
 
+// 带上下文的结构化日志方法
+func (s *StandardLoggerAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.DebugContextKV(ctx, msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.InfoContextKV(ctx, msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.WarnContextKV(ctx, msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.ErrorContextKV(ctx, msg, keysAndValues...)
+	}
+}
+
+func (s *StandardLoggerAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if s.healthy {
+		s.logger.FatalContextKV(ctx, msg, keysAndValues...)
+	}
+}
+
 // 原始日志条目方法
 func (s *StandardLoggerAdapter) Log(level LogLevel, msg string) {
 	if s.healthy {

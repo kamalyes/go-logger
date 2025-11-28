@@ -80,6 +80,13 @@ func (e *EmptyLogger) WarnKV(msg string, keysAndValues ...interface{})  {}
 func (e *EmptyLogger) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (e *EmptyLogger) FatalKV(msg string, keysAndValues ...interface{}) {}
 
+// 带上下文的结构化日志方法
+func (e *EmptyLogger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+func (e *EmptyLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}
+func (e *EmptyLogger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}
+func (e *EmptyLogger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+func (e *EmptyLogger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+
 // 原始日志条目方法
 func (e *EmptyLogger) Log(level LogLevel, msg string)                                          {}
 func (e *EmptyLogger) LogContext(ctx context.Context, level LogLevel, msg string)              {}

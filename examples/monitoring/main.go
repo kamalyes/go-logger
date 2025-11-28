@@ -14,14 +14,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/kamalyes/go-logger"
 	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/kamalyes/go-logger"
 )
 
 // 监控指标
@@ -190,6 +189,21 @@ func (m *MonitoringAdapter) InfoKV(msg string, keysAndValues ...interface{})  { 
 func (m *MonitoringAdapter) WarnKV(msg string, keysAndValues ...interface{})  { m.Warn(msg) }
 func (m *MonitoringAdapter) ErrorKV(msg string, keysAndValues ...interface{}) { m.Error(msg) }
 func (m *MonitoringAdapter) FatalKV(msg string, keysAndValues ...interface{}) { m.Fatal(msg) }
+func (m *MonitoringAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.Debug(msg)
+}
+func (m *MonitoringAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.Info(msg)
+}
+func (m *MonitoringAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.Warn(msg)
+}
+func (m *MonitoringAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.Error(msg)
+}
+func (m *MonitoringAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	m.Fatal(msg)
+}
 func (m *MonitoringAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:

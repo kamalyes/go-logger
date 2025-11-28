@@ -649,6 +649,13 @@ func (m *MockAdapter) WarnKV(msg string, keysAndValues ...interface{})  {}
 func (m *MockAdapter) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (m *MockAdapter) FatalKV(msg string, keysAndValues ...interface{}) {}
 
+// 带上下文的结构化日志方法（键值对）
+func (m *MockAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}
+func (m *MockAdapter) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}
+func (m *MockAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+func (m *MockAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
+
 // 原始日志条目方法
 func (m *MockAdapter) Log(level LogLevel, msg string)                                          {}
 func (m *MockAdapter) LogContext(ctx context.Context, level LogLevel, msg string)              {}

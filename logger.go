@@ -478,6 +478,16 @@ func (l *Logger) DebugKV(msg string, keysAndValues ...interface{}) {
 	}
 }
 
+func (l *Logger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	fields := l.parseKeysAndValues(keysAndValues...)
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.DebugContext(ctx, "%s", msg)
+	} else {
+		l.DebugContext(ctx, "%s", msg)
+	}
+}
+
 func (l *Logger) InfoKV(msg string, keysAndValues ...interface{}) {
 	fields := l.parseKeysAndValues(keysAndValues...)
 	if len(fields) > 0 {
@@ -485,6 +495,16 @@ func (l *Logger) InfoKV(msg string, keysAndValues ...interface{}) {
 		logger.Info("%s", msg)
 	} else {
 		l.Info("%s", msg)
+	}
+}
+
+func (l *Logger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	fields := l.parseKeysAndValues(keysAndValues...)
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.InfoContext(ctx, "%s", msg)
+	} else {
+		l.InfoContext(ctx, "%s", msg)
 	}
 }
 
@@ -498,6 +518,16 @@ func (l *Logger) WarnKV(msg string, keysAndValues ...interface{}) {
 	}
 }
 
+func (l *Logger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	fields := l.parseKeysAndValues(keysAndValues...)
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.WarnContext(ctx, "%s", msg)
+	} else {
+		l.WarnContext(ctx, "%s", msg)
+	}
+}
+
 func (l *Logger) ErrorKV(msg string, keysAndValues ...interface{}) {
 	fields := l.parseKeysAndValues(keysAndValues...)
 	if len(fields) > 0 {
@@ -508,6 +538,16 @@ func (l *Logger) ErrorKV(msg string, keysAndValues ...interface{}) {
 	}
 }
 
+func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	fields := l.parseKeysAndValues(keysAndValues...)
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.ErrorContext(ctx, "%s", msg)
+	} else {
+		l.ErrorContext(ctx, "%s", msg)
+	}
+}
+
 func (l *Logger) FatalKV(msg string, keysAndValues ...interface{}) {
 	fields := l.parseKeysAndValues(keysAndValues...)
 	if len(fields) > 0 {
@@ -515,6 +555,16 @@ func (l *Logger) FatalKV(msg string, keysAndValues ...interface{}) {
 		logger.Fatal("%s", msg)
 	} else {
 		l.Fatal("%s", msg)
+	}
+}
+
+func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	fields := l.parseKeysAndValues(keysAndValues...)
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.FatalContext(ctx, "%s", msg)
+	} else {
+		l.FatalContext(ctx, "%s", msg)
 	}
 }
 

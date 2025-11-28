@@ -611,11 +611,25 @@ func (l *UltraFastLogger) DebugKV(msg string, keysAndValues ...interface{}) {
 	l.logWithKV(DEBUG, msg, keysAndValues...)
 }
 
+func (l *UltraFastLogger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if l.level > DEBUG {
+		return
+	}
+	l.logWithContextKV(ctx, DEBUG, msg, keysAndValues...)
+}
+
 func (l *UltraFastLogger) InfoKV(msg string, keysAndValues ...interface{}) {
 	if l.level > INFO {
 		return
 	}
 	l.logWithKV(INFO, msg, keysAndValues...)
+}
+
+func (l *UltraFastLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if l.level > INFO {
+		return
+	}
+	l.logWithContextKV(ctx, INFO, msg, keysAndValues...)
 }
 
 func (l *UltraFastLogger) WarnKV(msg string, keysAndValues ...interface{}) {
@@ -625,6 +639,13 @@ func (l *UltraFastLogger) WarnKV(msg string, keysAndValues ...interface{}) {
 	l.logWithKV(WARN, msg, keysAndValues...)
 }
 
+func (l *UltraFastLogger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if l.level > WARN {
+		return
+	}
+	l.logWithContextKV(ctx, WARN, msg, keysAndValues...)
+}
+
 func (l *UltraFastLogger) ErrorKV(msg string, keysAndValues ...interface{}) {
 	if l.level > ERROR {
 		return
@@ -632,8 +653,21 @@ func (l *UltraFastLogger) ErrorKV(msg string, keysAndValues ...interface{}) {
 	l.logWithKV(ERROR, msg, keysAndValues...)
 }
 
+func (l *UltraFastLogger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	if l.level > ERROR {
+		return
+	}
+	l.logWithContextKV(ctx, ERROR, msg, keysAndValues...)
+}
+
 func (l *UltraFastLogger) FatalKV(msg string, keysAndValues ...interface{}) {
 	l.logWithKV(FATAL, msg, keysAndValues...)
+	os.Exit(1)
+}
+
+func (l *UltraFastLogger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	l.logWithContextKV(ctx, FATAL, msg, keysAndValues...)
+	os.Exit(1)
 }
 
 func (l *UltraFastLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
@@ -682,6 +716,23 @@ func (l *UltraFastLogger) logWithKV(level LogLevel, msg string, keysAndValues ..
 
 	// 注意: 这里必须复制字符串,因为buf会被回收
 	l.ultraLog(level, string(buf))
+}
+
+// logWithContextKV 带上下文的键值对日志
+func (l *UltraFastLogger) logWithContextKV(ctx context.Context, level LogLevel, msg string, keysAndValues ...interface{}) {
+	// 先从context提取信息
+	allKV := keysAndValues
+	if ctx != nil && l.contextExtractor != nil {
+		ctxInfo := l.contextExtractor(ctx)
+		if ctxInfo != "" {
+			// 将context信息作为额外的KV对添加
+			allKV = make([]interface{}, 0, len(keysAndValues)+2)
+			allKV = append(allKV, "context", ctxInfo)
+			allKV = append(allKV, keysAndValues...)
+		}
+	}
+
+	l.logWithKV(level, msg, allKV...)
 }
 
 // 字段方法返回简化的包装器
@@ -979,18 +1030,47 @@ func (f *ultraFieldLogger) FatalContext(ctx context.Context, format string, args
 func (f *ultraFieldLogger) DebugKV(msg string, keysAndValues ...interface{}) {
 	f.logger.DebugKV(msg, keysAndValues...)
 }
+
+func (f *ultraFieldLogger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	kv := f.mergeKV(keysAndValues...)
+	f.logger.DebugContextKV(ctx, msg, kv...)
+}
+
 func (f *ultraFieldLogger) InfoKV(msg string, keysAndValues ...interface{}) {
 	f.logger.InfoKV(msg, keysAndValues...)
+}
+
+func (f *ultraFieldLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	kv := f.mergeKV(keysAndValues...)
+	f.logger.InfoContextKV(ctx, msg, kv...)
 }
 func (f *ultraFieldLogger) WarnKV(msg string, keysAndValues ...interface{}) {
 	f.logger.WarnKV(msg, keysAndValues...)
 }
+
+func (f *ultraFieldLogger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	kv := f.mergeKV(keysAndValues...)
+	f.logger.WarnContextKV(ctx, msg, kv...)
+}
+
 func (f *ultraFieldLogger) ErrorKV(msg string, keysAndValues ...interface{}) {
 	f.logger.ErrorKV(msg, keysAndValues...)
 }
+
+func (f *ultraFieldLogger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	kv := f.mergeKV(keysAndValues...)
+	f.logger.ErrorContextKV(ctx, msg, kv...)
+}
+
 func (f *ultraFieldLogger) FatalKV(msg string, keysAndValues ...interface{}) {
 	f.logger.FatalKV(msg, keysAndValues...)
 }
+
+func (f *ultraFieldLogger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
+	kv := f.mergeKV(keysAndValues...)
+	f.logger.FatalContextKV(ctx, msg, kv...)
+}
+
 func (f *ultraFieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
 	f.logger.LogKV(level, msg, keysAndValues...)
 }
@@ -1044,4 +1124,26 @@ func (f *ultraFieldLogger) Clone() ILogger {
 		newFields[f.key] = f.value
 	}
 	return &ultraFieldLogger{logger: f.logger.Clone(), fields: newFields}
+}
+
+// mergeKV 合并字段和键值对
+func (f *ultraFieldLogger) mergeKV(keysAndValues ...interface{}) []interface{} {
+	result := make([]interface{}, 0, len(keysAndValues)+len(f.fields)*2+2)
+
+	// 添加现有字段
+	if f.fields != nil {
+		for k, v := range f.fields {
+			result = append(result, k, v)
+		}
+	}
+
+	// 添加单个键值对
+	if f.key != "" {
+		result = append(result, f.key, f.value)
+	}
+
+	// 添加传入的键值对
+	result = append(result, keysAndValues...)
+
+	return result
 }
