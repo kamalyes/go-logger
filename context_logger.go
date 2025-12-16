@@ -12,6 +12,7 @@ package logger
 
 import (
 	"context"
+
 	"github.com/kamalyes/go-toolbox/pkg/mathx"
 )
 
@@ -40,27 +41,27 @@ func (cl *ContextLogger) Log(level string, msg string, keysAndValues ...interfac
 
 	switch level {
 	case "trace", "debug":
-		mathx.IfLazy(hasKV,
+		mathx.IfDoAF(hasKV,
 			func() any { logger.DebugKV(msg, keysAndValues...); return nil },
 			func() any { logger.DebugMsg(msg); return nil },
 		)
 	case "info":
-		mathx.IfLazy(hasKV,
+		mathx.IfDoAF(hasKV,
 			func() any { logger.InfoKV(msg, keysAndValues...); return nil },
 			func() any { logger.InfoMsg(msg); return nil },
 		)
 	case "warn":
-		mathx.IfLazy(hasKV,
+		mathx.IfDoAF(hasKV,
 			func() any { logger.WarnKV(msg, keysAndValues...); return nil },
 			func() any { logger.WarnMsg(msg); return nil },
 		)
 	case "error":
-		mathx.IfLazy(hasKV,
+		mathx.IfDoAF(hasKV,
 			func() any { logger.ErrorKV(msg, keysAndValues...); return nil },
 			func() any { logger.ErrorMsg(msg); return nil },
 		)
 	case "fatal":
-		mathx.IfLazy(hasKV,
+		mathx.IfDoAF(hasKV,
 			func() any { logger.FatalKV(msg, keysAndValues...); return nil },
 			func() any { logger.FatalMsg(msg); return nil },
 		)
