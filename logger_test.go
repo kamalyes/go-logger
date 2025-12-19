@@ -14,12 +14,13 @@ package logger
 import (
 	"bytes"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 // LoggerTestSuite 核心日志器测试套件
@@ -742,5 +743,192 @@ func BenchmarkChainMethods(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = New().WithLevel(DEBUG).WithPrefix("[BENCH] ").WithShowCaller(true)
+	}
+}
+
+// TestLoggerKVWithObject 测试 KV 方法支持对象自动解析
+func TestLoggerKVWithObject(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	config.Level = DEBUG // 设置为 DEBUG 级别
+	logger := NewLogger(config)
+
+	// 定义测试结构体
+	type User struct {
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Age      int    `json:"age"`
+		IsActive bool   `json:"is_active"`
+	}
+
+	user := User{
+		ID:       1001,
+		Name:     "张三",
+		Email:    "zhangsan@example.com",
+		Age:      25,
+		IsActive: true,
+	}
+
+	// 测试 InfoKV 使用对象参数
+	buffer.Reset()
+	logger.InfoKV("用户登录", user)
+	output := buffer.String()
+	
+	assert.Contains(t, output, "用户登录")
+	assert.Contains(t, output, "id")
+	assert.Contains(t, output, "1001")
+	assert.Contains(t, output, "name")
+	assert.Contains(t, output, "张三")
+	assert.Contains(t, output, "email")
+	assert.Contains(t, output, "zhangsan@example.com")
+
+	// 测试 DebugKV 使用对象参数
+	buffer.Reset()
+	logger.DebugKV("调试信息", user)
+	output = buffer.String()
+	
+	assert.NotEmpty(t, output, "调试输出不应为空")
+	assert.Contains(t, output, "调试信息")
+	assert.Contains(t, output, "age")
+	assert.Contains(t, output, "25")
+
+	// 测试使用 map 参数
+	buffer.Reset()
+	data := map[string]interface{}{
+		"request_id": "req-12345",
+		"method":     "POST",
+		"path":       "/api/users",
+		"status":     200,
+	}
+	logger.InfoKV("API请求", data)
+	output = buffer.String()
+	
+	assert.Contains(t, output, "API请求")
+	assert.Contains(t, output, "request_id")
+	assert.Contains(t, output, "req-12345")
+	assert.Contains(t, output, "method")
+	assert.Contains(t, output, "POST")
+
+	// 测试使用指针参数
+	buffer.Reset()
+	userPtr := &user
+	logger.WarnKV("警告信息", userPtr)
+	output = buffer.String()
+	
+	assert.Contains(t, output, "警告信息")
+	assert.Contains(t, output, "name")
+	assert.Contains(t, output, "张三")
+
+	// 测试传统的 key-value 对参数（向后兼容）
+	buffer.Reset()
+	logger.InfoKV("传统方式", "key1", "value1", "key2", 123)
+	output = buffer.String()
+	
+	assert.Contains(t, output, "传统方式")
+	assert.Contains(t, output, "key1")
+	assert.Contains(t, output, "value1")
+	assert.Contains(t, output, "key2")
+	assert.Contains(t, output, "123")
+}
+
+// TestLoggerKVReturnWithObject 测试 KVReturn 方法支持对象参数
+func TestLoggerKVReturnWithObject(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	type ErrorInfo struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Details string `json:"details"`
+	}
+
+	errInfo := ErrorInfo{
+		Code:    500,
+		Message: "服务器内部错误",
+		Details: "数据库连接失败",
+	}
+
+	// 测试 ErrorKVReturn 使用对象参数
+	err := logger.ErrorKVReturn("系统错误", errInfo)
+	assert.NotNil(t, err)
+	assert.Equal(t, "系统错误", err.Error())
+	
+	output := buffer.String()
+	assert.Contains(t, output, "系统错误")
+	assert.Contains(t, output, "code")
+	assert.Contains(t, output, "500")
+	assert.Contains(t, output, "message")
+	assert.Contains(t, output, "服务器内部错误")
+
+	// 测试 WarnKVReturn 使用 map 参数
+	buffer.Reset()
+	warnData := map[string]interface{}{
+		"cpu_usage":    85.5,
+		"memory_usage": 90.2,
+		"disk_usage":   75.0,
+	}
+	err = logger.WarnKVReturn("资源使用率过高", warnData)
+	assert.NotNil(t, err)
+	
+	output = buffer.String()
+	assert.Contains(t, output, "资源使用率过高")
+	assert.Contains(t, output, "cpu_usage")
+	assert.Contains(t, output, "85.5")
+}
+
+// BenchmarkKVWithObject 性能测试：对象参数
+func BenchmarkKVWithObject(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	type TestData struct {
+		Field1 string `json:"field1"`
+		Field2 int    `json:"field2"`
+		Field3 bool   `json:"field3"`
+	}
+	
+	data := TestData{
+		Field1: "test",
+		Field2: 123,
+		Field3: true,
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.InfoKV("测试消息", data)
+	}
+}
+
+// BenchmarkKVWithMap 性能测试：map 参数
+func BenchmarkKVWithMap(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	data := map[string]interface{}{
+		"field1": "test",
+		"field2": 123,
+		"field3": true,
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.InfoKV("测试消息", data)
+	}
+}
+
+// BenchmarkKVWithKeyValuePairs 性能测试：传统 key-value 对
+func BenchmarkKVWithKeyValuePairs(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.InfoKV("测试消息", "field1", "test", "field2", 123, "field3", true)
 	}
 }

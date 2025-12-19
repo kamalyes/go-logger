@@ -219,7 +219,28 @@ func main() {
     // 🏆 极致性能版本 (推荐高并发场景)
     ultraLogger := logger.NewUltraFast()
     ultraLogger.Info("High performance logging")
+    
+    // 结构化日志 - 键值对方式
     ultraLogger.InfoKV("High performance with fields", "key", "value")
+    
+    // 🎯 结构化日志 - 对象方式 (自动解析)
+    type User struct {
+        ID    int    `json:"id"`
+        Name  string `json:"name"`
+        Email string `json:"email"`
+    }
+    user := User{ID: 1001, Name: "张三", Email: "user@example.com"}
+    
+    // 直接传递对象，自动解析为键值对
+    ultraLogger.InfoKV("用户登录", user)
+    
+    // 也支持 map
+    data := map[string]interface{}{
+        "request_id": "req-123",
+        "method":     "POST",
+        "status":     200,
+    }
+    ultraLogger.InfoKV("API 请求", data)
     
     // ⚡ 优化版标准Logger
     optimizedLogger := logger.NewOptimized()

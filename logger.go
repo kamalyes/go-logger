@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -654,10 +655,17 @@ func (l *Logger) Println(args ...interface{}) {
 	l.Info("%s", fmt.Sprintln(args...))
 }
 
-// parseKeysAndValues 解析键值对参数 - 优化版本
+// parseKeysAndValues 解析键值对参数 - 优化版本，支持结构体对象自动解析
 func (l *Logger) parseKeysAndValues(keysAndValues ...interface{}) map[string]interface{} {
 	if len(keysAndValues) == 0 {
 		return nil
+	}
+
+	// 如果只有一个参数且不是字符串，尝试作为对象解析
+	if len(keysAndValues) == 1 {
+		if objFields := parseObject(keysAndValues[0]); objFields != nil {
+			return objFields
+		}
 	}
 
 	// 预分配合适大小的map
@@ -687,6 +695,65 @@ func toString(v interface{}) string {
 	default:
 		return fmt.Sprint(v)
 	}
+}
+
+// parseObject 解析对象为 key-value map
+// 支持 struct、map[string]interface{}
+func parseObject(obj interface{}) map[string]interface{} {
+	if obj == nil {
+		return nil
+	}
+
+	// 处理 map[string]interface{} (any 是 interface{} 的别名，无需重复处理)
+	if m, ok := obj.(map[string]interface{}); ok {
+		return m
+	}
+
+	// 使用反射处理结构体
+	v := reflect.ValueOf(obj)
+	
+	// 如果是指针，获取其指向的值
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+
+	// 只处理结构体类型
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+
+	t := v.Type()
+	fields := make(map[string]interface{}, v.NumField())
+
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		// 跳过未导出的字段
+		if !field.IsExported() {
+			continue
+		}
+
+		// 获取字段名，优先使用 json tag
+		fieldName := field.Name
+		if tag := field.Tag.Get("json"); tag != "" {
+			// 处理 json tag，去除 omitempty 等选项
+			if idx := strings.Index(tag, ","); idx != -1 {
+				tag = tag[:idx]
+			}
+			if tag != "" && tag != "-" {
+				fieldName = tag
+			}
+		}
+
+		// 获取字段值
+		fields[fieldName] = fieldValue.Interface()
+	}
+
+	return fields
 }
 
 // ========== 返回错误的日志方法 ==========
