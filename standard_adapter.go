@@ -571,3 +571,42 @@ func (s *StandardLoggerAdapter) ErrorKVReturn(msg string, keysAndValues ...inter
 	}
 	return fmt.Errorf("%s", msg)
 }
+
+// Console 相关方法
+func (s *StandardLoggerAdapter) ConsoleGroup(label string, args ...interface{}) {
+	if s.healthy {
+		s.logger.ConsoleGroup(label, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	if s.healthy {
+		s.logger.ConsoleGroupCollapsed(label, args...)
+	}
+}
+
+func (s *StandardLoggerAdapter) ConsoleGroupEnd() {
+	if s.healthy {
+		s.logger.ConsoleGroupEnd()
+	}
+}
+
+func (s *StandardLoggerAdapter) ConsoleTable(data interface{}) {
+	if s.healthy {
+		s.logger.ConsoleTable(data)
+	}
+}
+
+func (s *StandardLoggerAdapter) ConsoleTime(label string) *Timer {
+	if s.healthy {
+		return s.logger.ConsoleTime(label)
+	}
+	return nil
+}
+
+func (s *StandardLoggerAdapter) NewConsoleGroup() *ConsoleGroup {
+	if s.healthy {
+		return s.logger.NewConsoleGroup()
+	}
+	return &ConsoleGroup{}
+}

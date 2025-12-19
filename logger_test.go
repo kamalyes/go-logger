@@ -13,6 +13,7 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -882,6 +883,153 @@ func TestLoggerKVReturnWithObject(t *testing.T) {
 	assert.Contains(t, output, "85.5")
 }
 
+// TestNewConsoleGroup 测试创建 ConsoleGroup
+func TestNewConsoleGroup(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	assert.NotNil(t, cg, "ConsoleGroup 不应为 nil")
+	assert.Equal(t, 0, cg.indentLevel, "初始缩进级别应为 0")
+	assert.False(t, cg.collapsed, "初始状态不应折叠")
+}
+
+// TestConsoleGroupBasicFlow 测试 ConsoleGroup 基本流程
+func TestConsoleGroupBasicFlow(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	
+	// 测试基本分组
+	cg.Group("测试分组")
+	cg.Info("分组内的消息")
+	cg.GroupEnd()
+
+	output := buffer.String()
+	assert.Contains(t, output, "▼ 测试分组")
+	assert.Contains(t, output, "分组内的消息")
+}
+
+// TestConsoleGroupNested 测试嵌套分组
+func TestConsoleGroupNested(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	
+	cg.Group("外层分组")
+	cg.Info("外层消息")
+	
+	cg.Group("内层分组")
+	cg.Info("内层消息")
+	cg.GroupEnd()
+	
+	cg.Info("回到外层")
+	cg.GroupEnd()
+
+	output := buffer.String()
+	assert.Contains(t, output, "外层分组")
+	assert.Contains(t, output, "内层分组")
+	assert.Contains(t, output, "外层消息")
+	assert.Contains(t, output, "内层消息")
+}
+
+// TestConsoleGroupTable 测试表格功能
+func TestConsoleGroupTable(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	
+	// 测试 map 表格
+	data := map[string]interface{}{
+		"名称": "测试",
+		"值":  123,
+	}
+	cg.Table(data)
+
+	output := buffer.String()
+	assert.Contains(t, output, "名称")
+	assert.Contains(t, output, "测试")
+}
+
+// TestConsoleGroupTimer 测试计时器功能
+func TestConsoleGroupTimer(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	
+	timer := cg.Time("测试计时器")
+	time.Sleep(10 * time.Millisecond)
+	timer.End()
+
+	output := buffer.String()
+	assert.Contains(t, output, "测试计时器")
+	assert.Contains(t, output, "ms") // 应该包含时间单位
+}
+
+// TestConsoleGroupContextMethods 测试带 Context 的方法
+func TestConsoleGroupContextMethods(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	cg := logger.NewConsoleGroup()
+	ctx := context.Background()
+	
+	cg.Group("Context 测试")
+	cg.InfoContext(ctx, "Info with context")
+	cg.DebugContext(ctx, "Debug with context")
+	cg.WarnContext(ctx, "Warn with context")
+	cg.ErrorContext(ctx, "Error with context")
+	cg.GroupEnd()
+
+	output := buffer.String()
+	assert.Contains(t, output, "Info with context")
+	assert.Contains(t, output, "Error with context")
+}
+
+// TestLoggerConsoleIntegration 测试 Logger 的 Console 集成方法
+func TestLoggerConsoleIntegration(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	config := DefaultConfig()
+	config.Output = buffer
+	config.Colorful = false
+	logger := NewLogger(config)
+
+	// 测试通过 Logger 直接调用 Console 方法
+	logger.ConsoleGroup("集成测试")
+	logger.ConsoleTable(map[string]interface{}{"key": "value"})
+	timer := logger.ConsoleTime("timer")
+	time.Sleep(5 * time.Millisecond)
+	timer.End()
+	logger.ConsoleGroupEnd()
+
+	output := buffer.String()
+	assert.Contains(t, output, "集成测试")
+	assert.Contains(t, output, "key")
+	assert.Contains(t, output, "timer")
+}
+
 // BenchmarkKVWithObject 性能测试：对象参数
 func BenchmarkKVWithObject(b *testing.B) {
 	logger := New()
@@ -930,5 +1078,50 @@ func BenchmarkKVWithKeyValuePairs(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		logger.InfoKV("测试消息", "field1", "test", "field2", 123, "field3", true)
+	}
+}
+
+// BenchmarkConsoleGroup 性能测试：ConsoleGroup
+func BenchmarkConsoleGroup(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cg := logger.NewConsoleGroup()
+		cg.Group("Benchmark")
+		cg.Info("Test message")
+		cg.GroupEnd()
+	}
+}
+
+// BenchmarkConsoleTable 性能测试：ConsoleTable
+func BenchmarkConsoleTable(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	data := map[string]interface{}{
+		"field1": "test",
+		"field2": 123,
+		"field3": true,
+	}
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cg := logger.NewConsoleGroup()
+		cg.Table(data)
+	}
+}
+
+// BenchmarkConsoleTimer 性能测试：ConsoleTimer
+func BenchmarkConsoleTimer(b *testing.B) {
+	logger := New()
+	logger.SetLevel(INFO)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cg := logger.NewConsoleGroup()
+		timer := cg.Time("benchmark")
+		timer.End()
 	}
 }

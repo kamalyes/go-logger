@@ -34,6 +34,7 @@
 - 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
 - 🔌 **[自定义上下文提取器](docs/CUSTOM_CONTEXT_EXTRACTOR.md)** - 灵活提取和自定义上下文信息
 - ↩️ **[返回错误日志](docs/RETURN_ERROR.md)** - 简化错误处理的日志方法
+- 🎨 **[Console 风格日志](docs/CONSOLE_USAGE.md)** - JavaScript Console 风格的分组、表格和计时器功能
 - 📝 **[更新日志](./CHANGELOG.md)** - 版本更新和功能变更记录
 - 🔧 **[配置指南](docs/CONFIGURATION.md)** - 完整配置选项和最佳实践
 - 🧩 **[适配器系统](docs/ADAPTERS.md)** - 适配器完整指南和自定义开发
@@ -250,6 +251,39 @@ func main() {
     fullLogger := logger.New()
     fullLogger.Info("Full featured logging")
     
+    // 🎨 Console 风格日志 - JavaScript 风格的分组、表格和计时器
+    cg := fullLogger.NewConsoleGroup()
+    
+    // 📊 分组日志 - 组织相关日志输出
+    cg.Group("🚀 应用启动流程")
+    cg.Info("开始初始化...")
+    
+    // 📋 表格展示 - 美化配置信息
+    config := map[string]interface{}{
+        "环境":   "生产环境",
+        "端口":   8080,
+        "调试模式": false,
+    }
+    cg.Table(config)
+    // 输出:
+    //   ┌──────────┬────────────┐
+    //   │ Key      │ Value      │
+    //   ├──────────┼────────────┤
+    //   │ 环境      │ 生产环境   │
+    //   │ 端口      │ 8080       │
+    //   │ 调试模式   │ false     │
+    //   └──────────┴────────────┘
+    
+    // ⏱️  计时器 - 测量操作耗时
+    timer := cg.Time("数据库连接")
+    // ... 执行数据库连接 ...
+    timer.End() // 输出: ⏱️  数据库连接: 123.45ms
+    
+    cg.Info("✅ 启动完成")
+    cg.GroupEnd()
+    
+    // 📖 查看完整 Console 功能文档: docs/CONSOLE_USAGE.md
+    
     // 🎯 使用现有的Context ID管理
     ctx := context.Background()
     
@@ -275,6 +309,116 @@ func main() {
     ultraLogger.SetContextExtractor(extractor)
 }
 ```
+
+### 🎨 Console 风格日志功能
+
+类似 JavaScript `console` 的日志分组、表格和计时器功能,让日志输出更加结构化和易读。
+
+```go
+log := logger.NewLogger(logger.DefaultConfig())
+cg := log.NewConsoleGroup()
+
+// 📊 日志分组 - 组织相关日志
+cg.Group("🌐 API 请求处理")
+cg.Info("接收到请求: GET /api/users")
+
+    // 嵌套分组
+    cg.Group("参数验证")
+    cg.Info("验证通过")
+    cg.GroupEnd()
+
+// 📋 表格展示 - 结构化数据可视化
+users := []map[string]interface{}{
+    {"ID": 1, "姓名": "张三", "年龄": 25, "状态": "Active"},
+    {"ID": 2, "姓名": "李四", "年龄": 30, "状态": "Active"},
+}
+cg.Table(users)
+// 输出美观的表格:
+//   ┌────┬──────┬──────┬────────┐
+//   │ ID │ 姓名  │ 年龄  │ 状态    │
+//   ├────┼──────┼──────┼────────┤
+//   │ 1  │ 张三  │ 25   │ Active │
+//   │ 2  │ 李四  │ 30   │ Active │
+//   └────┴──────┴──────┴────────┘
+
+// ⏱️  性能计时 - 测量操作耗时
+timer := cg.Time("数据库查询")
+// ... 执行数据库操作 ...
+timer.End()  // 输出: ⏱️  数据库查询: 123.45ms
+
+// 中间检查点
+timer2 := cg.Time("文件处理")
+// ... 执行部分操作 ...
+timer2.Log("处理 50%")  // 输出: ⏱️  文件处理: 50.12ms - 处理 50%
+// ... 继续操作 ...
+timer2.End()  // 输出: ⏱️  文件处理: 102.34ms
+
+cg.Info("✅ 请求处理完成")
+cg.GroupEnd()
+
+// 🎯 折叠分组 - 隐藏详细日志（仅显示 ERROR/FATAL）
+cg.GroupCollapsed("调试信息")
+cg.Debug("这条不会显示")
+cg.Info("这条也不会显示")
+cg.Error("但错误日志会显示")  // ❌ 会显示
+cg.GroupEnd()
+
+// 🌐 全局便捷方法 - 不需要 ConsoleGroup
+logger.Group("全局分组")
+logger.Info("这是全局分组内的日志")
+logger.Table(map[string]string{"key": "value"})
+logger.GroupEnd()
+
+timer := logger.Time("全局计时器")
+// ... 操作 ...
+timer.End()
+```
+
+**主要特性**：
+- 🎯 **日志分组**: 
+  - `Group(label, ...args)` - 开始新分组
+  - `GroupCollapsed(label, ...args)` - 开始折叠分组（仅显示 ERROR/FATAL）
+  - `GroupEnd()` - 结束当前分组
+  - 支持无限层级嵌套，自动缩进
+
+- 📊 **表格渲染**: 
+  - `Table(data)` - 智能表格渲染
+  - 支持格式: `[]map[string]interface{}`, `map[string]interface{}`, `[][]string`, `[]string`
+  - 自动对齐、美化边框、智能列宽
+
+- ⏱️  **计时器**: 
+  - `Time(label)` - 开始计时，返回 Timer 对象
+  - `Timer.End()` - 结束计时并输出总耗时
+  - `Timer.Log(message)` - 输出中间检查点
+  - 智能时间格式化 (ms/s/m)
+
+- 🔄 **Context 集成**: 
+  - `InfoContext(ctx, ...)` - 带上下文的 Info 日志
+  - `DebugContext(ctx, ...)` - 带上下文的 Debug 日志
+  - `WarnContext(ctx, ...)` - 带上下文的 Warn 日志
+  - `ErrorContext(ctx, ...)` - 带上下文的 Error 日志
+  - 在分组内使用，自动继承缩进
+
+- 🌐 **全局方法**: 
+  - `logger.Group()` / `logger.GroupEnd()`
+  - `logger.Table(data)`
+  - `logger.Time(label)`
+  - 无需创建 ConsoleGroup，直接使用
+
+**适用场景**：
+- 🚀 应用启动流程展示
+- 📊 批量数据处理进度
+- 🔍 复杂业务流程追踪
+- ⚡ 性能瓶颈分析
+- 🐛 调试信息结构化输出
+
+**兼容性**：
+- ✅ 所有日志器均支持: `Logger`, `UltraFastLogger`, `StandardAdapter`
+- ✅ `UltraFastLogger` 通过内部委托实现完整 Console 功能
+- ✅ `EmptyLogger` 提供空实现，不影响生产环境性能
+
+📖 **[查看完整 Console 使用文档和高级示例 →](docs/CONSOLE_USAGE.md)**
+
 
 ## 🤝 社区贡献
 

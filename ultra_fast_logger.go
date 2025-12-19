@@ -89,6 +89,9 @@ type UltraFastLogger struct {
 
 	// 自定义上下文提取器
 	contextExtractor ContextExtractor // 可选的自定义上下文提取器
+
+	// Console 功能委托
+	consoleLogger *Logger // 用于处理 Console 功能的标准日志器
 }
 
 // NewUltraFastLogger 创建极致性能日志器
@@ -97,6 +100,15 @@ func NewUltraFastLogger(config *LogConfig) *UltraFastLogger {
 		config = DefaultConfig()
 	}
 
+	// 创建用于 Console 功能的标准日志器
+	consoleLogger := NewLogger(&LogConfig{
+		Level:      config.Level,
+		Output:     config.Output,
+		Colorful:   config.Colorful,
+		ShowCaller: config.ShowCaller,
+		Prefix:     config.Prefix,
+	})
+
 	return &UltraFastLogger{
 		level:            config.Level,
 		colorful:         config.Colorful,
@@ -104,11 +116,18 @@ func NewUltraFastLogger(config *LogConfig) *UltraFastLogger {
 		skipTimestamp:    false, // 可配置
 		skipCaller:       !config.ShowCaller,
 		contextExtractor: defaultContextExtractor, // 使用默认提取器
+		consoleLogger:    consoleLogger,
 	}
 }
 
 // NewUltraFastLoggerNoTime 创建不包含时间戳的极致性能日志器
 func NewUltraFastLoggerNoTime(output io.Writer, level LogLevel) *UltraFastLogger {
+	// 创建用于 Console 功能的标准日志器
+	consoleLogger := NewLogger(&LogConfig{
+		Level:  level,
+		Output: output,
+	})
+
 	return &UltraFastLogger{
 		level:            level,
 		colorful:         false,
@@ -116,6 +135,7 @@ func NewUltraFastLoggerNoTime(output io.Writer, level LogLevel) *UltraFastLogger
 		skipTimestamp:    true,
 		skipCaller:       true,
 		contextExtractor: defaultContextExtractor, // 使用默认提取器
+		consoleLogger:    consoleLogger,
 	}
 }
 
@@ -761,6 +781,7 @@ func (l *UltraFastLogger) Clone() ILogger {
 		skipTimestamp:    l.skipTimestamp,
 		skipCaller:       l.skipCaller,
 		contextExtractor: l.contextExtractor, // 复制上下文提取器
+		consoleLogger:    l.consoleLogger,    // 共享 consoleLogger
 	}
 }
 
@@ -1325,4 +1346,68 @@ func (f *ultraFieldLogger) WarnKVReturn(msg string, keysAndValues ...interface{}
 func (f *ultraFieldLogger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
 	f.ErrorKV(msg, keysAndValues...)
 	return fmt.Errorf("%s", msg)
+}
+
+// Console 相关方法 - UltraFastLogger (委托给内部的 consoleLogger)
+func (l *UltraFastLogger) ConsoleGroup(label string, args ...interface{}) {
+	if l.consoleLogger != nil {
+		l.consoleLogger.ConsoleGroup(label, args...)
+	}
+}
+
+func (l *UltraFastLogger) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	if l.consoleLogger != nil {
+		l.consoleLogger.ConsoleGroupCollapsed(label, args...)
+	}
+}
+
+func (l *UltraFastLogger) ConsoleGroupEnd() {
+	if l.consoleLogger != nil {
+		l.consoleLogger.ConsoleGroupEnd()
+	}
+}
+
+func (l *UltraFastLogger) ConsoleTable(data interface{}) {
+	if l.consoleLogger != nil {
+		l.consoleLogger.ConsoleTable(data)
+	}
+}
+
+func (l *UltraFastLogger) ConsoleTime(label string) *Timer {
+	if l.consoleLogger != nil {
+		return l.consoleLogger.ConsoleTime(label)
+	}
+	return nil
+}
+
+func (l *UltraFastLogger) NewConsoleGroup() *ConsoleGroup {
+	if l.consoleLogger != nil {
+		return l.consoleLogger.NewConsoleGroup()
+	}
+	return &ConsoleGroup{}
+}
+
+// Console 相关方法 - ultraFieldLogger
+func (f *ultraFieldLogger) ConsoleGroup(label string, args ...interface{}) {
+	f.logger.ConsoleGroup(label, args...)
+}
+
+func (f *ultraFieldLogger) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	f.logger.ConsoleGroupCollapsed(label, args...)
+}
+
+func (f *ultraFieldLogger) ConsoleGroupEnd() {
+	f.logger.ConsoleGroupEnd()
+}
+
+func (f *ultraFieldLogger) ConsoleTable(data interface{}) {
+	f.logger.ConsoleTable(data)
+}
+
+func (f *ultraFieldLogger) ConsoleTime(label string) *Timer {
+	return f.logger.ConsoleTime(label)
+}
+
+func (f *ultraFieldLogger) NewConsoleGroup() *ConsoleGroup {
+	return f.logger.NewConsoleGroup()
 }

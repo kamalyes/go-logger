@@ -38,6 +38,10 @@ type Logger struct {
 
 	// 统计信息
 	stats *LoggerStats
+
+	// Console 功能
+	consoleGroup     *ConsoleGroup
+	consoleGroupOnce sync.Once
 }
 
 // LoggerStats 日志统计信息

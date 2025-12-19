@@ -779,6 +779,14 @@ func (a *MemoryAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) 
 	return fmt.Errorf("%s", msg)
 }
 
+// Console 相关方法
+func (a *MemoryAdapter) ConsoleGroup(label string, args ...interface{})          {}
+func (a *MemoryAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {}
+func (a *MemoryAdapter) ConsoleGroupEnd()                                        {}
+func (a *MemoryAdapter) ConsoleTable(data interface{})                           {}
+func (a *MemoryAdapter) ConsoleTime(label string) *logger.Timer                  { return nil }
+func (a *MemoryAdapter) NewConsoleGroup() *logger.ConsoleGroup                   { return &logger.ConsoleGroup{} }
+
 // GetLogs 获取缓存的日志
 func (a *MemoryAdapter) GetLogs() []string {
 	a.mu.RLock()
@@ -1046,6 +1054,26 @@ func (f *FilterAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) 
 	return fmt.Errorf("%s", msg)
 }
 
+// Console 相关方法
+func (f *FilterAdapter) ConsoleGroup(label string, args ...interface{}) {
+	f.adapter.ConsoleGroup(label, args...)
+}
+func (f *FilterAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	f.adapter.ConsoleGroupCollapsed(label, args...)
+}
+func (f *FilterAdapter) ConsoleGroupEnd() {
+	f.adapter.ConsoleGroupEnd()
+}
+func (f *FilterAdapter) ConsoleTable(data interface{}) {
+	f.adapter.ConsoleTable(data)
+}
+func (f *FilterAdapter) ConsoleTime(label string) *logger.Timer {
+	return f.adapter.ConsoleTime(label)
+}
+func (f *FilterAdapter) NewConsoleGroup() *logger.ConsoleGroup {
+	return f.adapter.NewConsoleGroup()
+}
+
 // StatsAdapter - 统计适配器
 type StatsAdapter struct {
 	adapter logger.IAdapter
@@ -1295,4 +1323,24 @@ func (s *StatsAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) er
 func (s *StatsAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
 	s.ErrorKV(msg, keysAndValues...)
 	return fmt.Errorf("%s", msg)
+}
+
+// Console 相关方法
+func (s *StatsAdapter) ConsoleGroup(label string, args ...interface{}) {
+	s.adapter.ConsoleGroup(label, args...)
+}
+func (s *StatsAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	s.adapter.ConsoleGroupCollapsed(label, args...)
+}
+func (s *StatsAdapter) ConsoleGroupEnd() {
+	s.adapter.ConsoleGroupEnd()
+}
+func (s *StatsAdapter) ConsoleTable(data interface{}) {
+	s.adapter.ConsoleTable(data)
+}
+func (s *StatsAdapter) ConsoleTime(label string) *logger.Timer {
+	return s.adapter.ConsoleTime(label)
+}
+func (s *StatsAdapter) NewConsoleGroup() *logger.ConsoleGroup {
+	return s.adapter.NewConsoleGroup()
 }

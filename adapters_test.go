@@ -716,6 +716,20 @@ func (m *MockAdapter) WithContext(ctx context.Context) ILogger {
 	return m
 }
 
+// Console 相关方法
+func (m *MockAdapter) ConsoleGroup(label string, args ...interface{})          {}
+func (m *MockAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {}
+func (m *MockAdapter) ConsoleGroupEnd()                                        {}
+func (m *MockAdapter) ConsoleTable(data interface{})                           {}
+func (m *MockAdapter) ConsoleTime(label string) *Timer {
+	return nil
+}
+
+func (m *MockAdapter) NewConsoleGroup() *ConsoleGroup {
+	// 返回一个空的 ConsoleGroup,因为这是 mock 适配器
+	return &ConsoleGroup{}
+}
+
 // 兼容标准log包的方法
 func (m *MockAdapter) Print(args ...interface{})                 {}
 func (m *MockAdapter) Printf(format string, args ...interface{}) {}

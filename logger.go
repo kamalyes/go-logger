@@ -891,3 +891,51 @@ func WarnKVReturn(msg string, keysAndValues ...interface{}) error {
 func ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
 	return defaultLogger.ErrorKVReturn(msg, keysAndValues...)
 }
+
+// ============================================================================
+// Console 风格日志方法实现
+// ============================================================================
+
+// getOrCreateConsoleGroup 获取或创建 ConsoleGroup（延迟初始化）
+func (l *Logger) getOrCreateConsoleGroup() *ConsoleGroup {
+	l.consoleGroupOnce.Do(func() {
+		l.consoleGroup = &ConsoleGroup{
+			logger:          l,
+			indentLevel:     0,
+			collapsed:       false,
+			collapsedLevels: make([]bool, 0),
+		}
+	})
+	return l.consoleGroup
+}
+
+// ConsoleGroup 开始一个新的日志分组
+func (l *Logger) ConsoleGroup(label string, args ...interface{}) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.Group(label, args...)
+}
+
+// ConsoleGroupCollapsed 开始一个折叠的日志分组
+func (l *Logger) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.GroupCollapsed(label, args...)
+}
+
+// ConsoleGroupEnd 结束当前分组
+func (l *Logger) ConsoleGroupEnd() {
+	cg := l.getOrCreateConsoleGroup()
+	cg.GroupEnd()
+}
+
+// ConsoleTable 显示表格
+func (l *Logger) ConsoleTable(data interface{}) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.Table(data)
+}
+
+// ConsoleTime 开始计时
+func (l *Logger) ConsoleTime(label string) *Timer {
+	cg := l.getOrCreateConsoleGroup()
+	return cg.Time(label)
+}
+

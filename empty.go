@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-09-18 11:15:58
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 09:29:33
+ * @LastEditTime: 2025-12-19 23:27:35
  * @FilePath: \go-logger\empty.go
  * @Description: 空日志实现，用于禁用日志输出的场景
  *
@@ -416,4 +416,35 @@ func WrapWithEmpty(original ILogger) ILogger {
 		empty.SetShowCaller(original.IsShowCaller())
 	}
 	return empty
+}
+
+// NewConsoleGroup 创建空的 ConsoleGroup（不执行任何操作）
+func (e *EmptyLogger) NewConsoleGroup() *ConsoleGroup {
+	// 返回一个假的 ConsoleGroup，所有操作都不会输出
+	return &ConsoleGroup{
+		logger:          e,
+		indentLevel:     0,
+		collapsed:       false,
+		collapsedLevels: make([]bool, 0),
+	}
+}
+
+// ConsoleGroup 空实现 - 开始分组（不执行任何操作）
+func (e *EmptyLogger) ConsoleGroup(label string, args ...interface{}) {}
+
+// ConsoleGroupCollapsed 空实现 - 开始折叠分组（不执行任何操作）
+func (e *EmptyLogger) ConsoleGroupCollapsed(label string, args ...interface{}) {}
+
+// ConsoleGroupEnd 空实现 - 结束分组（不执行任何操作）
+func (e *EmptyLogger) ConsoleGroupEnd() {}
+
+// ConsoleTable 空实现 - 显示表格（不执行任何操作）
+func (e *EmptyLogger) ConsoleTable(data interface{}) {}
+
+// ConsoleTime 空实现 - 开始计时（返回空的计时器）
+func (e *EmptyLogger) ConsoleTime(label string) *Timer {
+	return &Timer{
+		logger: e,
+		label:  label,
+	}
 }

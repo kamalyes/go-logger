@@ -107,6 +107,14 @@ type ILogger interface {
 	Print(args ...interface{})                 // 兼容标准log包
 	Printf(format string, args ...interface{}) // 兼容标准log包
 	Println(args ...interface{})               // 兼容标准log包
+
+	// Console 风格日志功能
+	NewConsoleGroup() *ConsoleGroup                          // 创建控制台分组
+	ConsoleGroup(label string, args ...interface{})          // 开始日志分组
+	ConsoleGroupCollapsed(label string, args ...interface{}) // 开始折叠分组
+	ConsoleGroupEnd()                                        // 结束当前分组
+	ConsoleTable(data interface{})                           // 显示表格
+	ConsoleTime(label string) *Timer                         // 开始计时
 }
 
 // IAdapter 日志适配器接口

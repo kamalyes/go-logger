@@ -315,6 +315,26 @@ func (m *MonitoringAdapter) ErrorKVReturn(msg string, keysAndValues ...interface
 	return fmt.Errorf("%s", msg)
 }
 
+// Console 相关方法
+func (m *MonitoringAdapter) ConsoleGroup(label string, args ...interface{}) {
+	m.adapter.ConsoleGroup(label, args...)
+}
+func (m *MonitoringAdapter) ConsoleGroupCollapsed(label string, args ...interface{}) {
+	m.adapter.ConsoleGroupCollapsed(label, args...)
+}
+func (m *MonitoringAdapter) ConsoleGroupEnd() {
+	m.adapter.ConsoleGroupEnd()
+}
+func (m *MonitoringAdapter) ConsoleTable(data interface{}) {
+	m.adapter.ConsoleTable(data)
+}
+func (m *MonitoringAdapter) ConsoleTime(label string) *logger.Timer {
+	return m.adapter.ConsoleTime(label)
+}
+func (m *MonitoringAdapter) NewConsoleGroup() *logger.ConsoleGroup {
+	return m.adapter.NewConsoleGroup()
+}
+
 func main() {
 	fmt.Println("📊 Go Logger - 监控示例演示")
 	fmt.Println(strings.Repeat("=", 50))
