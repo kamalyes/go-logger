@@ -60,6 +60,48 @@ func (e *EmptyLogger) WarnMsg(msg string)  {}
 func (e *EmptyLogger) ErrorMsg(msg string) {}
 func (e *EmptyLogger) FatalMsg(msg string) {}
 
+// 返回错误的日志方法
+func (e *EmptyLogger) DebugReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) InfoReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) WarnReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) ErrorReturn(format string, args ...interface{}) error {
+	return nil
+}
+
+// 返回错误的上下文日志方法
+func (e *EmptyLogger) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+
+// 返回错误的键值对日志方法
+func (e *EmptyLogger) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (e *EmptyLogger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+
 // 多行日志方法
 func (e *EmptyLogger) InfoLines(lines ...string)  {}
 func (e *EmptyLogger) ErrorLines(lines ...string) {}

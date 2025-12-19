@@ -484,3 +484,90 @@ func (s *StandardLoggerAdapter) Println(args ...interface{}) {
 		s.logger.Println(args...)
 	}
 }
+
+// 返回错误的日志方法
+func (s *StandardLoggerAdapter) DebugReturn(format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.DebugReturn(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) InfoReturn(format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.InfoReturn(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) WarnReturn(format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.WarnReturn(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) ErrorReturn(format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.ErrorReturn(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的上下文日志方法
+func (s *StandardLoggerAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.DebugCtxReturn(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.InfoCtxReturn(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.WarnCtxReturn(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StandardLoggerAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if s.healthy {
+		return s.logger.ErrorCtxReturn(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的键值对日志方法
+func (s *StandardLoggerAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	if s.healthy {
+		return s.logger.DebugKVReturn(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StandardLoggerAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	if s.healthy {
+		return s.logger.InfoKVReturn(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StandardLoggerAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	if s.healthy {
+		return s.logger.WarnKVReturn(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StandardLoggerAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	if s.healthy {
+		return s.logger.ErrorKVReturn(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}

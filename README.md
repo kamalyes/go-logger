@@ -33,6 +33,7 @@
 - 🔄 **[迁移指南](docs/MIGRATION.md)** - 从其他日志库迁移的完整指南
 - 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
 - 🔌 **[自定义上下文提取器](docs/CUSTOM_CONTEXT_EXTRACTOR.md)** - 灵活提取和自定义上下文信息
+- ↩️ **[返回错误日志](docs/RETURN_ERROR.md)** - 简化错误处理的日志方法
 - 📝 **[更新日志](./CHANGELOG.md)** - 版本更新和功能变更记录
 - 🔧 **[配置指南](docs/CONFIGURATION.md)** - 完整配置选项和最佳实践
 - 🧩 **[适配器系统](docs/ADAPTERS.md)** - 适配器完整指南和自定义开发

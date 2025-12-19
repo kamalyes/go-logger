@@ -16,12 +16,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 // AdapterTestSuite 适配器测试套件
@@ -667,6 +668,48 @@ func (m *MockAdapter) DebugLines(lines ...string) {}
 func (m *MockAdapter) InfoLines(lines ...string)  {}
 func (m *MockAdapter) WarnLines(lines ...string)  {}
 func (m *MockAdapter) ErrorLines(lines ...string) {}
+
+// 返回错误的日志方法
+func (m *MockAdapter) DebugReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) InfoReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) WarnReturn(format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) ErrorReturn(format string, args ...interface{}) error {
+	return nil
+}
+
+// 返回错误的上下文日志方法
+func (m *MockAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return nil
+}
+
+// 返回错误的键值对日志方法
+func (m *MockAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
+func (m *MockAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	return nil
+}
 
 // WithContext 的实现
 func (m *MockAdapter) WithContext(ctx context.Context) ILogger {

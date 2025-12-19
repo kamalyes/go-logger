@@ -14,13 +14,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/kamalyes/go-logger"
 	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kamalyes/go-logger"
 )
 
 // 监控指标
@@ -251,6 +252,67 @@ func (m *MonitoringAdapter) ErrorLines(lines ...string) {
 	for _, line := range lines {
 		m.Error("%s", line)
 	}
+}
+
+// 返回错误的日志方法
+func (m *MonitoringAdapter) DebugReturn(format string, args ...interface{}) error {
+	m.Debug(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) InfoReturn(format string, args ...interface{}) error {
+	m.Info(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) WarnReturn(format string, args ...interface{}) error {
+	m.Warn(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) ErrorReturn(format string, args ...interface{}) error {
+	m.Error(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	m.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	m.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	m.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	m.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (m *MonitoringAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	m.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (m *MonitoringAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	m.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (m *MonitoringAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	m.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (m *MonitoringAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	m.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
 }
 
 func main() {

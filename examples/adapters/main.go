@@ -14,12 +14,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/kamalyes/go-logger"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kamalyes/go-logger"
 )
 
 func main() {
@@ -717,6 +718,67 @@ func (a *MemoryAdapter) ErrorLines(lines ...string) {
 	}
 }
 
+// 返回错误的日志方法
+func (a *MemoryAdapter) DebugReturn(format string, args ...interface{}) error {
+	a.Debug(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) InfoReturn(format string, args ...interface{}) error {
+	a.Info(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) WarnReturn(format string, args ...interface{}) error {
+	a.Warn(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) ErrorReturn(format string, args ...interface{}) error {
+	a.Error(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	a.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	a.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	a.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	a.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (a *MemoryAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	a.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (a *MemoryAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	a.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (a *MemoryAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	a.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (a *MemoryAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	a.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
 // GetLogs 获取缓存的日志
 func (a *MemoryAdapter) GetLogs() []string {
 	a.mu.RLock()
@@ -897,6 +959,91 @@ func (f *FilterAdapter) ErrorLines(lines ...string) {
 	for _, line := range lines {
 		f.Error("%s", line)
 	}
+}
+
+// 返回错误的日志方法
+func (f *FilterAdapter) DebugReturn(format string, args ...interface{}) error {
+	if f.shouldLog(logger.DEBUG, format) {
+		f.adapter.Debug(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) InfoReturn(format string, args ...interface{}) error {
+	if f.shouldLog(logger.INFO, format) {
+		f.adapter.Info(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) WarnReturn(format string, args ...interface{}) error {
+	if f.shouldLog(logger.WARN, format) {
+		f.adapter.Warn(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) ErrorReturn(format string, args ...interface{}) error {
+	if f.shouldLog(logger.ERROR, format) {
+		f.adapter.Error(format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if f.shouldLog(logger.DEBUG, format) {
+		f.adapter.DebugContext(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if f.shouldLog(logger.INFO, format) {
+		f.adapter.InfoContext(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if f.shouldLog(logger.WARN, format) {
+		f.adapter.WarnContext(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if f.shouldLog(logger.ERROR, format) {
+		f.adapter.ErrorContext(ctx, format, args...)
+	}
+	return fmt.Errorf(format, args...)
+}
+
+func (f *FilterAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	if f.shouldLog(logger.DEBUG, msg) {
+		f.adapter.DebugKV(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *FilterAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	if f.shouldLog(logger.INFO, msg) {
+		f.adapter.InfoKV(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *FilterAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	if f.shouldLog(logger.WARN, msg) {
+		f.adapter.WarnKV(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *FilterAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	if f.shouldLog(logger.ERROR, msg) {
+		f.adapter.ErrorKV(msg, keysAndValues...)
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 // StatsAdapter - 统计适配器
@@ -1087,4 +1234,65 @@ func (s *StatsAdapter) ErrorLines(lines ...string) {
 	for _, line := range lines {
 		s.Error("%s", line)
 	}
+}
+
+// 返回错误的日志方法
+func (s *StatsAdapter) DebugReturn(format string, args ...interface{}) error {
+	s.Debug(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) InfoReturn(format string, args ...interface{}) error {
+	s.Info(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) WarnReturn(format string, args ...interface{}) error {
+	s.Warn(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) ErrorReturn(format string, args ...interface{}) error {
+	s.Error(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	s.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	s.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	s.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	s.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (s *StatsAdapter) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	s.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StatsAdapter) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	s.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StatsAdapter) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	s.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (s *StatsAdapter) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	s.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
 }

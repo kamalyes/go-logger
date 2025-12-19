@@ -38,6 +38,24 @@ type ILogger interface {
 	ErrorMsg(msg string)
 	FatalMsg(msg string)
 
+	// 返回错误的日志方法（记录日志并返回错误）
+	DebugReturn(format string, args ...interface{}) error
+	InfoReturn(format string, args ...interface{}) error
+	WarnReturn(format string, args ...interface{}) error
+	ErrorReturn(format string, args ...interface{}) error
+
+	// 返回错误的上下文日志方法
+	DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error
+	InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error
+	WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error
+	ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error
+
+	// 返回错误的键值对日志方法
+	DebugKVReturn(msg string, keysAndValues ...interface{}) error
+	InfoKVReturn(msg string, keysAndValues ...interface{}) error
+	WarnKVReturn(msg string, keysAndValues ...interface{}) error
+	ErrorKVReturn(msg string, keysAndValues ...interface{}) error
+
 	// 带上下文的日志方法
 	DebugContext(ctx context.Context, format string, args ...interface{})
 	InfoContext(ctx context.Context, format string, args ...interface{})

@@ -688,3 +688,139 @@ func toString(v interface{}) string {
 		return fmt.Sprint(v)
 	}
 }
+
+// ========== 返回错误的日志方法 ==========
+
+// DebugReturn 记录调试日志并返回格式化的错误
+func (l *Logger) DebugReturn(format string, args ...interface{}) error {
+	l.log(DEBUG, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// InfoReturn 记录信息日志并返回格式化的错误
+func (l *Logger) InfoReturn(format string, args ...interface{}) error {
+	l.log(INFO, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// WarnReturn 记录警告日志并返回格式化的错误
+func (l *Logger) WarnReturn(format string, args ...interface{}) error {
+	l.log(WARN, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// ErrorReturn 记录错误日志并返回格式化的错误
+func (l *Logger) ErrorReturn(format string, args ...interface{}) error {
+	l.log(ERROR, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// DebugCtxReturn 记录带上下文的调试日志并返回格式化的错误
+func (l *Logger) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	l.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// InfoCtxReturn 记录带上下文的信息日志并返回格式化的错误
+func (l *Logger) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	l.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// WarnCtxReturn 记录带上下文的警告日志并返回格式化的错误
+func (l *Logger) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	l.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// ErrorCtxReturn 记录带上下文的错误日志并返回格式化的错误
+func (l *Logger) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	l.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// DebugKVReturn 记录带键值对的调试日志并返回错误
+func (l *Logger) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	l.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// InfoKVReturn 记录带键值对的信息日志并返回错误
+func (l *Logger) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	l.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// WarnKVReturn 记录带键值对的警告日志并返回错误
+func (l *Logger) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	l.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// ErrorKVReturn 记录带键值对的错误日志并返回错误
+func (l *Logger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	l.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// ========== 全局返回错误的日志方法 ==========
+
+// DebugReturn 全局调试日志并返回错误
+func DebugReturn(format string, args ...interface{}) error {
+	return defaultLogger.DebugReturn(format, args...)
+}
+
+// InfoReturn 全局信息日志并返回错误
+func InfoReturn(format string, args ...interface{}) error {
+	return defaultLogger.InfoReturn(format, args...)
+}
+
+// WarnReturn 全局警告日志并返回错误
+func WarnReturn(format string, args ...interface{}) error {
+	return defaultLogger.WarnReturn(format, args...)
+}
+
+// ErrorReturn 全局错误日志并返回错误
+func ErrorReturn(format string, args ...interface{}) error {
+	return defaultLogger.ErrorReturn(format, args...)
+}
+
+// DebugCtxReturn 全局带上下文的调试日志并返回错误
+func DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return defaultLogger.DebugCtxReturn(ctx, format, args...)
+}
+
+// InfoCtxReturn 全局带上下文的信息日志并返回错误
+func InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return defaultLogger.InfoCtxReturn(ctx, format, args...)
+}
+
+// WarnCtxReturn 全局带上下文的警告日志并返回错误
+func WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return defaultLogger.WarnCtxReturn(ctx, format, args...)
+}
+
+// ErrorCtxReturn 全局带上下文的错误日志并返回错误
+func ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	return defaultLogger.ErrorCtxReturn(ctx, format, args...)
+}
+
+// DebugKVReturn 全局带键值对的调试日志并返回错误
+func DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	return defaultLogger.DebugKVReturn(msg, keysAndValues...)
+}
+
+// InfoKVReturn 全局带键值对的信息日志并返回错误
+func InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	return defaultLogger.InfoKVReturn(msg, keysAndValues...)
+}
+
+// WarnKVReturn 全局带键值对的警告日志并返回错误
+func WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	return defaultLogger.WarnKVReturn(msg, keysAndValues...)
+}
+
+// ErrorKVReturn 全局带键值对的错误日志并返回错误
+func ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	return defaultLogger.ErrorKVReturn(msg, keysAndValues...)
+}

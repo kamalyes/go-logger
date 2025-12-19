@@ -13,13 +13,14 @@ package logger
 import (
 	"context"
 	"fmt"
-	"google.golang.org/grpc/metadata"
 	"io"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 	"unsafe"
+
+	"google.golang.org/grpc/metadata"
 )
 
 // 极致优化常量
@@ -763,6 +764,121 @@ func (l *UltraFastLogger) Clone() ILogger {
 	}
 }
 
+// 返回错误的日志方法
+func (l *UltraFastLogger) DebugReturn(format string, args ...interface{}) error {
+	if l.level > DEBUG {
+		return fmt.Errorf(format, args...)
+	}
+	l.ultraLogf(DEBUG, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) InfoReturn(format string, args ...interface{}) error {
+	if l.level > INFO {
+		return fmt.Errorf(format, args...)
+	}
+	l.ultraLogf(INFO, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) WarnReturn(format string, args ...interface{}) error {
+	if l.level > WARN {
+		return fmt.Errorf(format, args...)
+	}
+	l.ultraLogf(WARN, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) ErrorReturn(format string, args ...interface{}) error {
+	if l.level > ERROR {
+		return fmt.Errorf(format, args...)
+	}
+	l.ultraLogf(ERROR, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的上下文日志方法
+func (l *UltraFastLogger) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if l.level > DEBUG {
+		return fmt.Errorf(format, args...)
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(DEBUG, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if l.level > INFO {
+		return fmt.Errorf(format, args...)
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(INFO, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if l.level > WARN {
+		return fmt.Errorf(format, args...)
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(WARN, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (l *UltraFastLogger) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	if l.level > ERROR {
+		return fmt.Errorf(format, args...)
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(ERROR, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的键值对日志方法
+func (l *UltraFastLogger) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	if l.level > DEBUG {
+		return fmt.Errorf("%s", msg)
+	}
+	l.logWithKV(DEBUG, msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (l *UltraFastLogger) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	if l.level > INFO {
+		return fmt.Errorf("%s", msg)
+	}
+	l.logWithKV(INFO, msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (l *UltraFastLogger) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	if l.level > WARN {
+		return fmt.Errorf("%s", msg)
+	}
+	l.logWithKV(WARN, msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (l *UltraFastLogger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	if l.level > ERROR {
+		return fmt.Errorf("%s", msg)
+	}
+	l.logWithKV(ERROR, msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
 // ultraFieldLogger 超轻量级字段日志器
 type ultraFieldLogger struct {
 	logger ILogger
@@ -1146,4 +1262,67 @@ func (f *ultraFieldLogger) mergeKV(keysAndValues ...interface{}) []interface{} {
 	result = append(result, keysAndValues...)
 
 	return result
+}
+
+// 返回错误的日志方法
+func (f *ultraFieldLogger) DebugReturn(format string, args ...interface{}) error {
+	f.logWithFields(DEBUG, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) InfoReturn(format string, args ...interface{}) error {
+	f.logWithFields(INFO, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) WarnReturn(format string, args ...interface{}) error {
+	f.logWithFields(WARN, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) ErrorReturn(format string, args ...interface{}) error {
+	f.logWithFields(ERROR, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的上下文日志方法
+func (f *ultraFieldLogger) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	f.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	f.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	f.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *ultraFieldLogger) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
+	f.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的键值对日志方法
+func (f *ultraFieldLogger) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
+	f.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *ultraFieldLogger) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
+	f.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *ultraFieldLogger) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
+	f.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *ultraFieldLogger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
+	f.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
 }
