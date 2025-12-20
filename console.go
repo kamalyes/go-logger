@@ -13,6 +13,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -50,7 +51,7 @@ func (cg *ConsoleGroup) Group(label string, args ...interface{}) {
 
 	indent := cg.getIndent()
 	msg := fmt.Sprintf(label, args...)
-	
+
 	cg.logger.InfoMsg(fmt.Sprintf("%s▼ %s", indent, msg))
 	cg.collapsedLevels = append(cg.collapsedLevels, false)
 	cg.indentLevel++
@@ -65,7 +66,7 @@ func (cg *ConsoleGroup) GroupCollapsed(label string, args ...interface{}) {
 
 	indent := cg.getIndent()
 	msg := fmt.Sprintf(label, args...)
-	
+
 	cg.logger.InfoMsg(fmt.Sprintf("%s▶ %s (折叠)", indent, msg))
 	cg.collapsedLevels = append(cg.collapsedLevels, true)
 	cg.indentLevel++
@@ -299,8 +300,15 @@ func (cg *ConsoleGroup) buildTableFromMap(data map[string]interface{}) *ConsoleT
 	headers := []string{"Key", "Value"}
 	rows := make([][]string, 0, len(data))
 
-	for key, val := range data {
-		rows = append(rows, []string{key, fmt.Sprintf("%v", val)})
+	// 对 key 进行排序，保证输出顺序一致
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		rows = append(rows, []string{key, fmt.Sprintf("%v", data[key])})
 	}
 
 	return &ConsoleTable{
@@ -330,9 +338,57 @@ func (cg *ConsoleGroup) buildTableFromStringSlice(data [][]string) *ConsoleTable
 }
 
 // buildTableFromReflect 通过反射构建表格（处理结构体切片）
-func (cg *ConsoleGroup) buildTableFromReflect(data interface{}) *ConsoleTable {
+func (cg *ConsoleGroup) buildTableFromReflect(_ interface{}) *ConsoleTable {
 	// 简化实现：返回 nil，可以后续扩展
 	return nil
+}
+
+// displayWidth 计算字符串的显示宽度（考虑中文、表情等宽字符）
+// 使用东亚宽度（East Asian Width）标准
+func (cg *ConsoleGroup) displayWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		w := runeWidth(r)
+		width += w
+	}
+	return width
+}
+
+// runeWidth 返回单个 rune 的显示宽度
+func runeWidth(r rune) int {
+	// ASCII 可见字符
+	if r >= 0x20 && r < 0x7F {
+		return 1
+	}
+
+	// 控制字符
+	if r < 0x20 || (r >= 0x7F && r < 0xA0) {
+		return 0
+	}
+
+	// 宽字符范围（占 2 列）
+	switch {
+	// CJK 统一表意文字
+	case r >= 0x1100 && r <= 0x115F, // Hangul Jamo
+		r >= 0x2329 && r <= 0x232A,   // LEFT/RIGHT-POINTING ANGLE BRACKET
+		r >= 0x2E80 && r <= 0x303E,   // CJK Radicals Supplement ... CJK Symbols and Punctuation
+		r >= 0x3040 && r <= 0xA4CF,   // Hiragana ... Hangul Syllables
+		r >= 0xAC00 && r <= 0xD7A3,   // Hangul Syllables
+		r >= 0xF900 && r <= 0xFAFF,   // CJK Compatibility Ideographs
+		r >= 0xFE10 && r <= 0xFE19,   // Vertical forms
+		r >= 0xFE30 && r <= 0xFE6F,   // CJK Compatibility Forms ... Small Form Variants
+		r >= 0xFF00 && r <= 0xFF60,   // Fullwidth Forms
+		r >= 0xFFE0 && r <= 0xFFE6,   // Fullwidth Forms
+		r >= 0x1F300 && r <= 0x1F64F, // Emoticons
+		r >= 0x1F680 && r <= 0x1F6FF, // Transport and Map
+		r >= 0x1F900 && r <= 0x1F9FF, // Supplemental Symbols and Pictographs
+		r >= 0x20000 && r <= 0x2FFFD, // CJK
+		r >= 0x30000 && r <= 0x3FFFD: // CJK
+		return 2
+	}
+
+	// 默认窄字符（1 列）
+	return 1
 }
 
 // formatTable 格式化表格输出
@@ -341,16 +397,19 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 		return indent + "空表格"
 	}
 
-	// 计算每列的最大宽度
+	// 计算每列的最大显示宽度（考虑中文字符）
 	colWidths := make([]int, len(table.Headers))
 	for i, header := range table.Headers {
-		colWidths[i] = len(header)
+		colWidths[i] = cg.displayWidth(header)
 	}
 
 	for _, row := range table.Rows {
 		for i, cell := range row {
-			if i < len(colWidths) && len(cell) > colWidths[i] {
-				colWidths[i] = len(cell)
+			if i < len(colWidths) {
+				cellWidth := cg.displayWidth(cell)
+				if cellWidth > colWidths[i] {
+					colWidths[i] = cellWidth
+				}
 			}
 		}
 	}
@@ -372,7 +431,11 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 	sb.WriteString(indent)
 	sb.WriteString("│")
 	for i, header := range table.Headers {
-		sb.WriteString(fmt.Sprintf(" %-*s ", colWidths[i], header))
+		// 计算需要补充的空格数
+		paddingWidth := colWidths[i] - cg.displayWidth(header)
+		sb.WriteString(" ")
+		sb.WriteString(header)
+		sb.WriteString(strings.Repeat(" ", paddingWidth+1))
 		sb.WriteString("│")
 	}
 	sb.WriteString("\n")
@@ -394,7 +457,11 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 		sb.WriteString("│")
 		for i, cell := range row {
 			if i < len(colWidths) {
-				sb.WriteString(fmt.Sprintf(" %-*s ", colWidths[i], cell))
+				// 计算需要补充的空格数
+				paddingWidth := colWidths[i] - cg.displayWidth(cell)
+				sb.WriteString(" ")
+				sb.WriteString(cell)
+				sb.WriteString(strings.Repeat(" ", paddingWidth+1))
 			} else {
 				sb.WriteString(" " + cell + " ")
 			}
@@ -440,4 +507,3 @@ func Table(data interface{}) {
 	cg := defaultLogger.NewConsoleGroup()
 	cg.Table(data)
 }
-

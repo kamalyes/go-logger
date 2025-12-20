@@ -277,24 +277,24 @@ func TestConsoleGroupWithContext(t *testing.T) {
 	// 测试带 Context 的日志方法
 	t.Run("ContextMethods", func(t *testing.T) {
 		cg.Group("带上下文的日志测试")
-		
+
 		cg.InfoContext(ctx, "这是带 Context 的 Info 日志")
 		cg.DebugContext(ctx, "这是带 Context 的 Debug 日志")
 		cg.WarnContext(ctx, "这是带 Context 的 Warn 日志")
 		cg.ErrorContext(ctx, "这是带 Context 的 Error 日志")
-		
+
 		cg.GroupEnd()
 	})
 
 	// 测试在折叠分组中使用 Context 方法
 	t.Run("ContextInCollapsedGroup", func(t *testing.T) {
 		cg.GroupCollapsed("折叠分组中的 Context 方法")
-		
+
 		cg.InfoContext(ctx, "这条不会显示（折叠状态）")
 		cg.DebugContext(ctx, "这条不会显示（折叠状态）")
 		cg.WarnContext(ctx, "这条不会显示（折叠状态）")
 		cg.ErrorContext(ctx, "这条 Error 会显示（即使折叠）")
-		
+
 		cg.GroupEnd()
 	})
 
@@ -302,19 +302,137 @@ func TestConsoleGroupWithContext(t *testing.T) {
 	t.Run("NestedContextGroups", func(t *testing.T) {
 		cg.Group("API 请求处理 (带 Context)")
 		cg.InfoContext(ctx, "收到请求: GET /api/users")
-		
+
 		cg.Group("参数验证")
 		cg.DebugContext(ctx, "验证参数: page=1, limit=10")
 		cg.InfoContext(ctx, "参数验证通过")
 		cg.GroupEnd()
-		
+
 		cg.Group("业务处理")
 		cg.InfoContext(ctx, "查询数据库")
 		cg.DebugContext(ctx, "SQL: SELECT * FROM users LIMIT 10")
 		cg.InfoContext(ctx, "查询完成，返回 10 条记录")
 		cg.GroupEnd()
-		
+
 		cg.InfoContext(ctx, "请求处理完成")
 		cg.GroupEnd()
 	})
+}
+
+// TestTableWithMixedContent 测试包含混合内容的表格（中英文、表情、符号、不同长度）
+func TestTableWithMixedContent(t *testing.T) {
+	logger := NewLogger(DefaultConfig())
+	cg := logger.NewConsoleGroup()
+
+	cg.Group("📊 混合内容表格测试")
+
+	// 测试1: 不同长度的中英文混合
+	t.Run("中英文混合", func(t *testing.T) {
+		data := map[string]interface{}{
+			"用户名":          "张三 (Zhang San)",
+			"Email":        "zhangsan@example.com",
+			"手机号":          "+86 138-1234-5678",
+			"地址":           "北京市朝阳区建国路88号SOHO现代城A座2501室",
+			"Status":       "Active ✓",
+			"会员等级":         "💎 Diamond VIP",
+			"积分":           "12,345",
+			"注册时间":         "2023-01-15 14:30:25",
+			"最后登录":         "2025-12-20 19:45:30",
+			"Account Type": "Premium",
+		}
+		cg.Info("示例1: 用户信息表（长短不一）")
+		cg.Table(data)
+	})
+
+	// 测试2: 包含表情符号
+	t.Run("表情符号", func(t *testing.T) {
+		emojiData := map[string]interface{}{
+			"🎉 活动名称": "双十二大促销",
+			"📅 开始时间": "2025-12-12 00:00:00",
+			"⏰ 结束时间": "2025-12-12 23:59:59",
+			"💰 优惠金额": "¥500",
+			"🛒 订单数":  "8,888",
+			"👥 参与人数": "15,234",
+			"✅ 状态":   "进行中",
+			"🔥 热度":   "⭐⭐⭐⭐⭐",
+			"📊 完成率":  "85.6%",
+			"🎯 目标":   "10,000单",
+		}
+		cg.Info("示例2: 活动统计表（含表情）")
+		cg.Table(emojiData)
+	})
+
+	// 测试3: 特殊符号和长文本
+	t.Run("特殊符号", func(t *testing.T) {
+		specialData := map[string]interface{}{
+			"API接口":        "/api/v1/users/{id}/profile",
+			"请求方法":         "POST → PUT → DELETE",
+			"状态码":          "200 ✓ | 404 ✗ | 500 ⚠",
+			"响应时间":         "≈ 125ms (avg) ± 15ms",
+			"Success Rate": "99.99% ≥ 99.9%",
+			"QPS":          "10K~50K req/s",
+			"数据大小":         "≤ 1MB (max: 5MB)",
+			"编码格式":         "UTF-8 / GBK / GB2312",
+			"Content-Type": "application/json; charset=utf-8",
+			"认证方式":         "Bearer Token (JWT) & API Key",
+		}
+		cg.Info("示例3: API接口信息（特殊符号）")
+		cg.Table(specialData)
+	})
+
+	// 测试4: 极短和极长混合
+	t.Run("长度差异大", func(t *testing.T) {
+		lengthData := map[string]interface{}{
+			"ID":           "1",
+			"超长字段测试内容":     "这是一个非常非常非常非常非常非常非常非常长的字符串，用来测试表格在处理超长内容时的表现，包含中文、English、数字123、符号!@#$%^&*()以及表情😀😁😂🤣",
+			"短":            "A",
+			"Description":  "A comprehensive system monitoring and alerting platform with real-time data visualization",
+			"中":            "测试",
+			"Mixed_测试_123": "Test测试🔥",
+			"URL":          "https://www.example.com/path/to/resource?param1=value1&param2=value2#section",
+			"简":            "简",
+			"版本号":          "v2.15.8-beta.3+build.20251220",
+			"S":            "S",
+		}
+		cg.Info("示例4: 长度差异测试")
+		cg.Table(lengthData)
+	})
+
+	// 测试5: 数值和单位混合
+	t.Run("数值单位", func(t *testing.T) {
+		numericData := map[string]interface{}{
+			"CPU使用率": "45.8% ↑",
+			"内存占用":   "8.5 GB / 16 GB",
+			"磁盘空间":   "256 GB (剩余: 128 GB)",
+			"网络流量 ↓": "1.25 MB/s",
+			"网络流量 ↑": "850 KB/s",
+			"温度":     "65°C ~ 75°C",
+			"转速":     "2,400 RPM",
+			"电压":     "3.3V ± 0.1V",
+			"功耗":     "≈ 95W (max: 150W)",
+			"运行时长":   "15天 8小时 32分钟",
+		}
+		cg.Info("示例5: 系统监控数据")
+		cg.Table(numericData)
+	})
+
+	// 测试6: 多语言混合
+	t.Run("多语言", func(t *testing.T) {
+		multiLangData := map[string]interface{}{
+			"中文":       "你好世界",
+			"English":  "Hello World",
+			"日本語":      "こんにちは世界",
+			"한국어":      "안녕하세요 세계",
+			"Français": "Bonjour le monde",
+			"Deutsch":  "Hallo Welt",
+			"Русский":  "Привет мир",
+			"العربية":  "مرحبا بالعالم",
+			"emoji":    "👋🌍🌎🌏",
+			"混合 Mixed": "你好 Hello 世界 World 🌟",
+		}
+		cg.Info("示例6: 多语言支持测试")
+		cg.Table(multiLangData)
+	})
+
+	cg.GroupEnd()
 }
