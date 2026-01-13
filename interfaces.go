@@ -70,6 +70,13 @@ type ILogger interface {
 	ErrorKV(msg string, keysAndValues ...interface{})
 	FatalKV(msg string, keysAndValues ...interface{})
 
+	// 结构化日志方法（字段映射）- 直接支持 map[string]interface{}
+	DebugWithFields(msg string, fields map[string]interface{})
+	InfoWithFields(msg string, fields map[string]interface{})
+	WarnWithFields(msg string, fields map[string]interface{})
+	ErrorWithFields(msg string, fields map[string]interface{})
+	FatalWithFields(msg string, fields map[string]interface{})
+
 	// 带上下文的结构化日志方法（键值对）
 	DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{})
 	InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})

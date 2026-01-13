@@ -569,6 +569,27 @@ func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues .
 	}
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (l *Logger) DebugWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(DEBUG, msg, fields)
+}
+
+func (l *Logger) InfoWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(INFO, msg, fields)
+}
+
+func (l *Logger) WarnWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(WARN, msg, fields)
+}
+
+func (l *Logger) ErrorWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(ERROR, msg, fields)
+}
+
+func (l *Logger) FatalWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(FATAL, msg, fields)
+}
+
 // 原始日志条目方法
 func (l *Logger) Log(level LogLevel, msg string) {
 	switch level {
@@ -711,7 +732,7 @@ func parseObject(obj interface{}) map[string]interface{} {
 
 	// 使用反射处理结构体
 	v := reflect.ValueOf(obj)
-	
+
 	// 如果是指针，获取其指向的值
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -938,4 +959,3 @@ func (l *Logger) ConsoleTime(label string) *Timer {
 	cg := l.getOrCreateConsoleGroup()
 	return cg.Time(label)
 }
-
