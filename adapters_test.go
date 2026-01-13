@@ -650,6 +650,13 @@ func (m *MockAdapter) WarnKV(msg string, keysAndValues ...interface{})  {}
 func (m *MockAdapter) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (m *MockAdapter) FatalKV(msg string, keysAndValues ...interface{}) {}
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (m *MockAdapter) DebugWithFields(msg string, fields map[string]interface{}) {}
+func (m *MockAdapter) InfoWithFields(msg string, fields map[string]interface{})  {}
+func (m *MockAdapter) WarnWithFields(msg string, fields map[string]interface{})  {}
+func (m *MockAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {}
+func (m *MockAdapter) FatalWithFields(msg string, fields map[string]interface{}) {}
+
 // 带上下文的结构化日志方法（键值对）
 func (m *MockAdapter) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
 func (m *MockAdapter) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}

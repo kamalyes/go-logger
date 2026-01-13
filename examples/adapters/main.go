@@ -681,6 +681,23 @@ func (a *MemoryAdapter) FatalContextKV(ctx context.Context, msg string, keysAndV
 	a.Fatal("%s", msg)
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (a *MemoryAdapter) DebugWithFields(msg string, fields map[string]interface{}) {
+	a.Debug("%s", msg)
+}
+func (a *MemoryAdapter) InfoWithFields(msg string, fields map[string]interface{}) {
+	a.Info("%s", msg)
+}
+func (a *MemoryAdapter) WarnWithFields(msg string, fields map[string]interface{}) {
+	a.Warn("%s", msg)
+}
+func (a *MemoryAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {
+	a.Error("%s", msg)
+}
+func (a *MemoryAdapter) FatalWithFields(msg string, fields map[string]interface{}) {
+	a.Fatal("%s", msg)
+}
+
 // 空实现的原始日志方法
 func (a *MemoryAdapter) Log(level logger.LogLevel, msg string) { a.logMessage(level, "%s", msg) }
 func (a *MemoryAdapter) LogContext(ctx context.Context, level logger.LogLevel, msg string) {
@@ -920,6 +937,24 @@ func (f *FilterAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndV
 func (f *FilterAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
 	f.Fatal(msg)
 }
+
+// 字段映射方法（直接支持 map[string]interface{}）
+func (f *FilterAdapter) DebugWithFields(msg string, fields map[string]interface{}) {
+	f.Debug(msg)
+}
+func (f *FilterAdapter) InfoWithFields(msg string, fields map[string]interface{}) {
+	f.Info(msg)
+}
+func (f *FilterAdapter) WarnWithFields(msg string, fields map[string]interface{}) {
+	f.Warn(msg)
+}
+func (f *FilterAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {
+	f.Error(msg)
+}
+func (f *FilterAdapter) FatalWithFields(msg string, fields map[string]interface{}) {
+	f.Fatal(msg)
+}
+
 func (f *FilterAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:
@@ -1215,6 +1250,24 @@ func (s *StatsAdapter) ErrorContextKV(ctx context.Context, msg string, keysAndVa
 func (s *StatsAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
 	s.Fatal(msg)
 }
+
+// 字段映射方法（直接支持 map[string]interface{}）
+func (s *StatsAdapter) DebugWithFields(msg string, fields map[string]interface{}) {
+	s.Debug(msg)
+}
+func (s *StatsAdapter) InfoWithFields(msg string, fields map[string]interface{}) {
+	s.Info(msg)
+}
+func (s *StatsAdapter) WarnWithFields(msg string, fields map[string]interface{}) {
+	s.Warn(msg)
+}
+func (s *StatsAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {
+	s.Error(msg)
+}
+func (s *StatsAdapter) FatalWithFields(msg string, fields map[string]interface{}) {
+	s.Fatal(msg)
+}
+
 func (s *StatsAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:

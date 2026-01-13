@@ -122,6 +122,13 @@ func (e *EmptyLogger) WarnKV(msg string, keysAndValues ...interface{})  {}
 func (e *EmptyLogger) ErrorKV(msg string, keysAndValues ...interface{}) {}
 func (e *EmptyLogger) FatalKV(msg string, keysAndValues ...interface{}) {}
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (e *EmptyLogger) DebugWithFields(msg string, fields map[string]interface{}) {}
+func (e *EmptyLogger) InfoWithFields(msg string, fields map[string]interface{})  {}
+func (e *EmptyLogger) WarnWithFields(msg string, fields map[string]interface{})  {}
+func (e *EmptyLogger) ErrorWithFields(msg string, fields map[string]interface{}) {}
+func (e *EmptyLogger) FatalWithFields(msg string, fields map[string]interface{}) {}
+
 // 带上下文的结构化日志方法
 func (e *EmptyLogger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {}
 func (e *EmptyLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{})  {}

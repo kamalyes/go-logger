@@ -569,6 +569,52 @@ func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues .
 	}
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (l *Logger) DebugWithFields(msg string, fields map[string]interface{}) {
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.Debug("%s", msg)
+	} else {
+		l.Debug("%s", msg)
+	}
+}
+
+func (l *Logger) InfoWithFields(msg string, fields map[string]interface{}) {
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.Info("%s", msg)
+	} else {
+		l.Info("%s", msg)
+	}
+}
+
+func (l *Logger) WarnWithFields(msg string, fields map[string]interface{}) {
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.Warn("%s", msg)
+	} else {
+		l.Warn("%s", msg)
+	}
+}
+
+func (l *Logger) ErrorWithFields(msg string, fields map[string]interface{}) {
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.Error("%s", msg)
+	} else {
+		l.Error("%s", msg)
+	}
+}
+
+func (l *Logger) FatalWithFields(msg string, fields map[string]interface{}) {
+	if len(fields) > 0 {
+		logger := l.WithFields(fields).(*Logger)
+		logger.Fatal("%s", msg)
+	} else {
+		l.Fatal("%s", msg)
+	}
+}
+
 // 原始日志条目方法
 func (l *Logger) Log(level LogLevel, msg string) {
 	switch level {
@@ -711,7 +757,7 @@ func parseObject(obj interface{}) map[string]interface{} {
 
 	// 使用反射处理结构体
 	v := reflect.ValueOf(obj)
-	
+
 	// 如果是指针，获取其指向的值
 	if v.Kind() == reflect.Ptr {
 		if v.IsNil() {
@@ -938,4 +984,3 @@ func (l *Logger) ConsoleTime(label string) *Timer {
 	cg := l.getOrCreateConsoleGroup()
 	return cg.Time(label)
 }
-

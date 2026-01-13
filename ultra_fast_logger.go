@@ -691,6 +691,40 @@ func (l *UltraFastLogger) FatalContextKV(ctx context.Context, msg string, keysAn
 	os.Exit(1)
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (l *UltraFastLogger) DebugWithFields(msg string, fields map[string]interface{}) {
+	if l.level > DEBUG {
+		return
+	}
+	l.LogWithFields(DEBUG, msg, fields)
+}
+
+func (l *UltraFastLogger) InfoWithFields(msg string, fields map[string]interface{}) {
+	if l.level > INFO {
+		return
+	}
+	l.LogWithFields(INFO, msg, fields)
+}
+
+func (l *UltraFastLogger) WarnWithFields(msg string, fields map[string]interface{}) {
+	if l.level > WARN {
+		return
+	}
+	l.LogWithFields(WARN, msg, fields)
+}
+
+func (l *UltraFastLogger) ErrorWithFields(msg string, fields map[string]interface{}) {
+	if l.level > ERROR {
+		return
+	}
+	l.LogWithFields(ERROR, msg, fields)
+}
+
+func (l *UltraFastLogger) FatalWithFields(msg string, fields map[string]interface{}) {
+	l.LogWithFields(FATAL, msg, fields)
+	os.Exit(1)
+}
+
 func (l *UltraFastLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
 	if level < l.level {
 		return
@@ -1208,6 +1242,32 @@ func (f *ultraFieldLogger) FatalContextKV(ctx context.Context, msg string, keysA
 	f.logger.FatalContextKV(ctx, msg, kv...)
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (f *ultraFieldLogger) DebugWithFields(msg string, fields map[string]interface{}) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.DebugWithFields(msg, mergedFields)
+}
+
+func (f *ultraFieldLogger) InfoWithFields(msg string, fields map[string]interface{}) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.InfoWithFields(msg, mergedFields)
+}
+
+func (f *ultraFieldLogger) WarnWithFields(msg string, fields map[string]interface{}) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.WarnWithFields(msg, mergedFields)
+}
+
+func (f *ultraFieldLogger) ErrorWithFields(msg string, fields map[string]interface{}) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.ErrorWithFields(msg, mergedFields)
+}
+
+func (f *ultraFieldLogger) FatalWithFields(msg string, fields map[string]interface{}) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.FatalWithFields(msg, mergedFields)
+}
+
 func (f *ultraFieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
 	f.logger.LogKV(level, msg, keysAndValues...)
 }
@@ -1283,6 +1343,30 @@ func (f *ultraFieldLogger) mergeKV(keysAndValues ...interface{}) []interface{} {
 	result = append(result, keysAndValues...)
 
 	return result
+}
+
+// mergeFieldsMap 合并字段映射
+func (f *ultraFieldLogger) mergeFieldsMap(fields map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{})
+
+	// 添加现有字段
+	if f.fields != nil {
+		for k, v := range f.fields {
+			merged[k] = v
+		}
+	}
+
+	// 添加单个键值对
+	if f.key != "" {
+		merged[f.key] = f.value
+	}
+
+	// 添加传入的字段
+	for k, v := range fields {
+		merged[k] = v
+	}
+
+	return merged
 }
 
 // 返回错误的日志方法

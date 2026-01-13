@@ -205,6 +205,24 @@ func (m *MonitoringAdapter) ErrorContextKV(ctx context.Context, msg string, keys
 func (m *MonitoringAdapter) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
 	m.Fatal(msg)
 }
+
+// 字段映射方法（直接支持 map[string]interface{}）
+func (m *MonitoringAdapter) DebugWithFields(msg string, fields map[string]interface{}) {
+	m.Debug(msg)
+}
+func (m *MonitoringAdapter) InfoWithFields(msg string, fields map[string]interface{}) {
+	m.Info(msg)
+}
+func (m *MonitoringAdapter) WarnWithFields(msg string, fields map[string]interface{}) {
+	m.Warn(msg)
+}
+func (m *MonitoringAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {
+	m.Error(msg)
+}
+func (m *MonitoringAdapter) FatalWithFields(msg string, fields map[string]interface{}) {
+	m.Fatal(msg)
+}
+
 func (m *MonitoringAdapter) Log(level logger.LogLevel, msg string) {
 	switch level {
 	case logger.DEBUG:

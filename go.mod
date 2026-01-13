@@ -14,7 +14,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/kamalyes/go-toolbox v0.11.87-0.20260113035202-2dbdc0ff0c6d
+	github.com/kamalyes/go-toolbox v0.11.87-0.20260113080618-85c570d0200e
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

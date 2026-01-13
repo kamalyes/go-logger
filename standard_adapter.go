@@ -426,6 +426,37 @@ func (s *StandardLoggerAdapter) FatalContextKV(ctx context.Context, msg string, 
 	}
 }
 
+// 字段映射方法（直接支持 map[string]interface{}）
+func (s *StandardLoggerAdapter) DebugWithFields(msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.DebugWithFields(msg, fields)
+	}
+}
+
+func (s *StandardLoggerAdapter) InfoWithFields(msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.InfoWithFields(msg, fields)
+	}
+}
+
+func (s *StandardLoggerAdapter) WarnWithFields(msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.WarnWithFields(msg, fields)
+	}
+}
+
+func (s *StandardLoggerAdapter) ErrorWithFields(msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.ErrorWithFields(msg, fields)
+	}
+}
+
+func (s *StandardLoggerAdapter) FatalWithFields(msg string, fields map[string]interface{}) {
+	if s.healthy {
+		s.logger.FatalWithFields(msg, fields)
+	}
+}
+
 // 原始日志条目方法
 func (s *StandardLoggerAdapter) Log(level LogLevel, msg string) {
 	if s.healthy {
