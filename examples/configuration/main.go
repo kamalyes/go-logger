@@ -12,10 +12,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/kamalyes/go-logger"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/kamalyes/go-logger"
 )
 
 func main() {
@@ -82,7 +83,7 @@ func demonstrateBasicConfiguration() {
 		"标准时间":    "2006-01-02 15:04:05",
 		"ISO时间":   "2006-01-02T15:04:05Z07:00",
 		"RFC3339": time.RFC3339,
-		"毫秒精度":    "2006-01-02 15:04:05.000",
+		"毫秒精度":    time.RFC3339Nano,
 		"Unix时间戳": "unix",
 	}
 
@@ -258,7 +259,7 @@ func demonstratePerformanceConfigurations() {
 	fmt.Println("\n🔹 标准配置对比:")
 	standardConfig := logger.DefaultConfig().
 		WithLevel(logger.INFO).
-		WithTimeFormat("2006-01-02 15:04:05.000").
+		WithTimeFormat(time.RFC3339Nano).
 		WithShowCaller(true).
 		WithColorful(true)
 	standardLogger := logger.NewLogger(standardConfig)
@@ -406,7 +407,7 @@ func demonstrateConfigurationPatterns() {
 	// 批处理任务配置模式
 	batchConfig := logger.DefaultConfig().
 		WithLevel(logger.DEBUG).
-		WithTimeFormat("2006-01-02 15:04:05.000")
+		WithTimeFormat(time.RFC3339Nano)
 	batchLogger := logger.NewLogger(batchConfig).WithField("job_type", "data-processing")
 
 	batchLogger.Info("批处理任务开始")

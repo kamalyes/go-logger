@@ -42,7 +42,7 @@ type BaseFormatter struct {
 // NewBaseFormatter 创建基础格式化器
 func NewBaseFormatter() *BaseFormatter {
 	return &BaseFormatter{
-		TimeFormat:   "2006-01-02 15:04:05.000",
+		TimeFormat:   time.RFC3339Nano,
 		ShowCaller:   true,
 		ShowLevel:    true,
 		ShowEmoji:    true,

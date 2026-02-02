@@ -148,6 +148,43 @@ func (l LogLevel) String() string {
 	return fmt.Sprintf("UNKNOWN(%d)", int(l))
 }
 
+// UnmarshalYAML 实现 YAML 反序列化，支持字符串和整数值
+func (l *LogLevel) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// 优先尝试字符串解析
+	var s string
+	if err := unmarshal(&s); err == nil {
+		level, parseErr := ParseLevel(s)
+		if parseErr != nil {
+			return parseErr
+		}
+		*l = level
+		return nil
+	}
+
+	// 降级为整数解析（向后兼容）
+	var i int
+	if err := unmarshal(&i); err != nil {
+		return err
+	}
+	*l = LogLevel(i)
+	return nil
+}
+
+// UnmarshalText 实现文本反序列化（用于 JSON 等）
+func (l *LogLevel) UnmarshalText(text []byte) error {
+	level, err := ParseLevel(string(text))
+	if err != nil {
+		return err
+	}
+	*l = level
+	return nil
+}
+
+// MarshalText 实现文本序列化（用于 JSON 等）
+func (l LogLevel) MarshalText() ([]byte, error) {
+	return []byte(l.String()), nil
+}
+
 // ShortString 返回级别的短字符串表示
 func (l LogLevel) ShortString() string {
 	if info, ok := levelInfoMap[l]; ok {
@@ -257,13 +294,13 @@ func (l LogLevel) IsPerformance() bool {
 // 全局级别函数
 // =============================================================================
 
-// ParseLevel 从字符串解析日志级别
+// ParseLevel 从字符串解析日志级别（支持大小写）
 func ParseLevel(level string) (LogLevel, error) {
 	level = strings.ToUpper(strings.TrimSpace(level))
 	if l, ok := levelNameMap[level]; ok {
 		return l, nil
 	}
-	return INFO, fmt.Errorf("invalid log level: %s", level)
+	return DEBUG, fmt.Errorf("invalid log level: %s", level)
 }
 
 // GetAllLevels 获取所有基础级别 (保持向后兼容)

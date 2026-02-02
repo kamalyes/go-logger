@@ -2,8 +2,10 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
-github.com/kamalyes/go-toolbox v0.11.87-0.20260113080618-85c570d0200e h1:TsqeY4+eNZhaC71RhU/Haey9wwPBXoQfvUCr7hoaYJc=
-github.com/kamalyes/go-toolbox v0.11.87-0.20260113080618-85c570d0200e/go.mod h1:l151q/zt/GaBgKrghaY6eb0EbUMdi9a109kgXXYLV4Q=
+github.com/kamalyes/go-jsonpath v0.0.0-20260129163507-0b67ed48bb28 h1:mftqfK+BB1eE+aXca1zAMyKUAGPlcKFwQS7og7bq3Qk=
+github.com/kamalyes/go-jsonpath v0.0.0-20260129163507-0b67ed48bb28/go.mod h1:Yu4Vw7F4dOKlhHK5RzBHYDvoSRdeHJgVwAjqXHXu4p4=
+github.com/kamalyes/go-toolbox v0.11.87-0.20260203051032-5f35aa1388aa h1:0wLj4QkZhC9UpMlkAmW/xi4e0+zcl8HouLs7x828ecc=
+github.com/kamalyes/go-toolbox v0.11.87-0.20260203051032-5f35aa1388aa/go.mod h1:T0toLZCP952jKKJFo8Rn+sZ9OktxxU7GYWFPpk/c98k=
 github.com/kr/pretty v0.2.0 h1:s5hAObm+yFO5uHYt5dYjxi2rXrsnmRpJx4OYvIWUaQs=
 github.com/kr/pretty v0.2.0/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=

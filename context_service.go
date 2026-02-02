@@ -12,9 +12,10 @@ package logger
 
 import (
 	"context"
-	"github.com/kamalyes/go-toolbox/pkg/idgen"
 	"sync"
 	"time"
+
+	"github.com/kamalyes/go-toolbox/pkg/idgen"
 )
 
 // ContextKey 统一键类型
@@ -30,6 +31,7 @@ const (
 	KeyCorrelationID ContextKey = "correlation_id"
 	KeyOperation     ContextKey = "operation"
 	KeyTenantID      ContextKey = "tenant_id"
+	KeyTimezone      ContextKey = "timezone"
 )
 
 // Field 定义一个可提取字段
@@ -137,7 +139,7 @@ func (cs *ContextService) ExtractFields(ctx context.Context) map[string]interfac
 		key  ContextKey
 		name string
 	}{
-		{KeyUserID, "user_id"}, {KeyTenantID, "tenant_id"}, {KeyCorrelationID, "correlation_id"}, {KeySessionID, "session_id"},
+		{KeyUserID, "user_id"}, {KeyTenantID, "tenant_id"}, {KeyCorrelationID, "correlation_id"}, {KeySessionID, "session_id"}, {KeyTimezone, "timezone"},
 	}
 	for _, e := range extras {
 		if _, exists := result[e.name]; !exists {
@@ -225,6 +227,14 @@ func WithCorrelationID(ctx context.Context, id string) context.Context {
 	return WithValue(ctx, KeyCorrelationID, id)
 }
 func GetCorrelationID(ctx context.Context) string { return GetString(ctx, KeyCorrelationID) }
+
+// WithTimezone 将 Timezone 设置到 context
+func WithTimezone(ctx context.Context, timezone string) context.Context {
+	return WithValue(ctx, KeyTimezone, timezone)
+}
+
+// GetTimezone 从 context 获取 Timezone
+func GetTimezone(ctx context.Context) string { return GetString(ctx, KeyTimezone) }
 
 // Correlation 操作
 func CreateCorrelationChain(ctx context.Context) (*CorrelationChain, context.Context) {

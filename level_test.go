@@ -12,10 +12,13 @@
 package logger
 
 import (
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+	"gopkg.in/yaml.v3"
 )
 
 // LevelTestSuite 日志级别测试套件
@@ -415,5 +418,122 @@ func TestLevelMemoryUsage(t *testing.T) {
 		_ = level.Emoji()
 		_ = level.Color()
 		_ = level.IsEnabled(INFO)
+	}
+}
+
+// TestLogLevelUnmarshalYAML 测试 YAML 反序列化
+func TestLogLevelUnmarshalYAML(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected LogLevel
+		hasError bool
+	}{
+		{"string_debug", "level: debug", DEBUG, false},
+		{"string_info", "level: info", INFO, false},
+		{"string_warn", "level: warn", WARN, false},
+		{"string_error", "level: error", ERROR, false},
+		{"string_uppercase", "level: DEBUG", DEBUG, false},
+		{"integer_value", "level: 1", INFO, false},
+		{"invalid_string", "level: invalid", INFO, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var config struct {
+				Level LogLevel `yaml:"level"`
+			}
+			err := yaml.Unmarshal([]byte(tt.yaml), &config)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, config.Level)
+			}
+		})
+	}
+}
+
+// TestLogLevelUnmarshalJSON 测试 JSON 反序列化
+func TestLogLevelUnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		expected LogLevel
+		hasError bool
+	}{
+		{"string_debug", `{"level":"debug"}`, DEBUG, false},
+		{"string_info", `{"level":"info"}`, INFO, false},
+		{"string_warn", `{"level":"warn"}`, WARN, false},
+		{"string_error", `{"level":"error"}`, ERROR, false},
+		{"string_uppercase", `{"level":"DEBUG"}`, DEBUG, false},
+		{"invalid_string", `{"level":"invalid"}`, INFO, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var config struct {
+				Level LogLevel `json:"level"`
+			}
+			err := json.Unmarshal([]byte(tt.json), &config)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, config.Level)
+			}
+		})
+	}
+}
+
+// TestLogLevelMarshalText 测试文本序列化
+func TestLogLevelMarshalText(t *testing.T) {
+	tests := []struct {
+		name     string
+		level    LogLevel
+		expected string
+	}{
+		{"debug", DEBUG, "DEBUG"},
+		{"info", INFO, "INFO"},
+		{"warn", WARN, "WARN"},
+		{"error", ERROR, "ERROR"},
+		{"fatal", FATAL, "FATAL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			text, err := tt.level.MarshalText()
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, string(text))
+		})
+	}
+}
+
+// TestLogLevelRoundTrip 测试序列化和反序列化往返
+func TestLogLevelRoundTrip(t *testing.T) {
+	levels := []LogLevel{DEBUG, INFO, WARN, ERROR, FATAL}
+	for _, level := range levels {
+		t.Run(level.String(), func(t *testing.T) {
+			// JSON 往返
+			jsonData, err := json.Marshal(struct {
+				Level LogLevel `json:"level"`
+			}{Level: level})
+			assert.NoError(t, err)
+			var jsonResult struct {
+				Level LogLevel `json:"level"`
+			}
+			err = json.Unmarshal(jsonData, &jsonResult)
+			assert.NoError(t, err)
+			assert.Equal(t, level, jsonResult.Level)
+
+			// YAML 往返
+			yamlData, err := yaml.Marshal(struct {
+				Level LogLevel `yaml:"level"`
+			}{Level: level})
+			assert.NoError(t, err)
+			var yamlResult struct {
+				Level LogLevel `yaml:"level"`
+			}
+			err = yaml.Unmarshal(yamlData, &yamlResult)
+			assert.NoError(t, err)
+			assert.Equal(t, level, yamlResult.Level)
+		})
 	}
 }
