@@ -178,7 +178,9 @@ func (h *FileHook) ensureFile() error {
 // rotate 轮转文件
 func (h *FileHook) rotate() error {
 	if h.file != nil {
-		h.file.Close()
+		if err := h.file.Close(); err != nil {
+			fmt.Printf("Warning: failed to close log file: %v\n", err)
+		}
 		h.file = nil
 	}
 
@@ -188,12 +190,16 @@ func (h *FileHook) rotate() error {
 		newPath := fmt.Sprintf("%s.%d", h.FilePath, i+1)
 
 		if _, err := os.Stat(oldPath); err == nil {
-			os.Rename(oldPath, newPath)
+			if err := os.Rename(oldPath, newPath); err != nil {
+				fmt.Printf("Warning: failed to rename log file: %v\n", err)
+			}
 		}
 	}
 
 	if _, err := os.Stat(h.FilePath); err == nil {
-		os.Rename(h.FilePath, h.FilePath+".1")
+		if err := os.Rename(h.FilePath, h.FilePath+".1"); err != nil {
+			fmt.Printf("Warning: failed to rotate log file: %v\n", err)
+		}
 	}
 
 	h.currentSize = 0
@@ -251,35 +257,37 @@ func (h *FileHook) Fire(entry *LogEntry) error {
 // EmailHook 邮件钩子
 type EmailHook struct {
 	*BaseHook
-	SMTPHost     string        `json:"smtp_host"`
-	SMTPPort     string        `json:"smtp_port"`
-	Username     string        `json:"username"`
-	Password     string        `json:"password"`
-	From         string        `json:"from"`
-	To           []string      `json:"to"`
-	Subject      string        `json:"subject"`
-	BatchSize    int           `json:"batch_size"`
-	FlushTimeout time.Duration `json:"flush_timeout"`
-	buffer       []*LogEntry
-	lastFlush    time.Time
-	bufferMutex  sync.Mutex
+	SMTPHost      string        `json:"smtp_host"`
+	SMTPPort      string        `json:"smtp_port"`
+	Username      string        `json:"username"`
+	Password      string        `json:"password"`
+	From          string        `json:"from"`
+	To            []string      `json:"to"`
+	Subject       string        `json:"subject"`
+	BatchSize     int           `json:"batch_size"`
+	FlushTimeout  time.Duration `json:"flush_timeout"`
+	MaxBufferSize int           `json:"max_buffer_size"`
+	buffer        []*LogEntry
+	lastFlush     time.Time
+	bufferMutex   sync.Mutex
 }
 
 // NewEmailHook 创建邮件钩子
 func NewEmailHook(host, port, username, password, from string, to []string) IHook {
 	hook := &EmailHook{
-		BaseHook:     NewBaseHook("email", ErrorLevels),
-		SMTPHost:     host,
-		SMTPPort:     port,
-		Username:     username,
-		Password:     password,
-		From:         from,
-		To:           to,
-		Subject:      "Application Log Alert",
-		BatchSize:    10,
-		FlushTimeout: 5 * time.Minute,
-		buffer:       make([]*LogEntry, 0),
-		lastFlush:    time.Now(),
+		BaseHook:      NewBaseHook("email", ErrorLevels),
+		SMTPHost:      host,
+		SMTPPort:      port,
+		Username:      username,
+		Password:      password,
+		From:          from,
+		To:            to,
+		Subject:       "Application Log Alert",
+		BatchSize:     10,
+		FlushTimeout:  5 * time.Minute,
+		MaxBufferSize: 1000,
+		buffer:        make([]*LogEntry, 0, 100),
+		lastFlush:     time.Now(),
 	}
 
 	// 启动定时刷新
@@ -296,6 +304,11 @@ func (h *EmailHook) Fire(entry *LogEntry) error {
 
 	h.bufferMutex.Lock()
 	defer h.bufferMutex.Unlock()
+
+	// 检查缓冲区大小限制
+	if len(h.buffer) >= h.MaxBufferSize {
+		h.buffer = h.buffer[1:]
+	}
 
 	h.buffer = append(h.buffer, entry)
 
@@ -315,7 +328,9 @@ func (h *EmailHook) flushPeriodically() {
 	for range ticker.C {
 		h.bufferMutex.Lock()
 		if len(h.buffer) > 0 && time.Since(h.lastFlush) > h.FlushTimeout {
-			h.flush()
+			if err := h.flush(); err != nil {
+				fmt.Printf("Failed to flush email buffer: %v\n", err)
+			}
 		}
 		h.bufferMutex.Unlock()
 	}
@@ -441,6 +456,9 @@ func (h *WebhookHook) Fire(entry *LogEntry) error {
 
 		req, err := http.NewRequest(h.Method, h.URL, bytes.NewBuffer(jsonData))
 		if err != nil {
+			if retry == h.MaxRetries {
+				return fmt.Errorf("failed to create request: %w", err)
+			}
 			continue
 		}
 
@@ -451,12 +469,13 @@ func (h *WebhookHook) Fire(entry *LogEntry) error {
 		resp, err := h.client.Do(req)
 		if err != nil {
 			if retry == h.MaxRetries {
-				return err
+				return fmt.Errorf("webhook request failed: %w", err)
 			}
 			continue
 		}
 
-		resp.Body.Close()
+		// 使用 defer 确保响应体总是关闭
+		defer resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return nil
@@ -467,7 +486,7 @@ func (h *WebhookHook) Fire(entry *LogEntry) error {
 		}
 	}
 
-	return nil
+	return fmt.Errorf("webhook request failed after %d retries", h.MaxRetries)
 }
 
 // HookManager 钩子管理器

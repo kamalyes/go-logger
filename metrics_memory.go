@@ -12,6 +12,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"runtime"
@@ -186,7 +187,8 @@ type DefaultMemoryMonitor struct {
 	// 基础字段
 	running   bool
 	startTime time.Time
-	stopChan  chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	// 配置
 	sampleInterval time.Duration
@@ -228,6 +230,9 @@ func (mm *DefaultMemoryMonitor) Start() error {
 	mm.running = true
 	mm.startTime = time.Now()
 
+	// 创建新的 context
+	mm.ctx, mm.cancel = context.WithCancel(context.Background())
+
 	// 设置GC百分比
 	if mm.enableGCTuning {
 		debug.SetGCPercent(mm.gcPercent)
@@ -255,9 +260,9 @@ func (mm *DefaultMemoryMonitor) Stop() error {
 
 	mm.running = false
 
-	if mm.stopChan != nil {
-		close(mm.stopChan)
-		mm.stopChan = nil
+	if mm.cancel != nil {
+		mm.cancel()
+		mm.cancel = nil
 	}
 
 	return nil
@@ -272,7 +277,7 @@ func (mm *DefaultMemoryMonitor) monitorLoop() {
 		select {
 		case <-ticker.C:
 			mm.collectMemoryData()
-		case <-mm.stopChan:
+		case <-mm.ctx.Done():
 			return
 		}
 	}
@@ -372,13 +377,14 @@ func (mm *DefaultMemoryMonitor) collectGCInfo() GCInfo {
 		gcInfo.AvgPause = time.Duration(mem.PauseTotalNs / uint64(mem.NumGC))
 	}
 
-	// 收集暂停历史
-	gcInfo.PauseHistory = make([]time.Duration, 0)
+	// 收集暂停历史（限制大小）
+	const maxPauseHistory = 256
+	gcInfo.PauseHistory = make([]time.Duration, 0, maxPauseHistory)
 	minPause := time.Duration(^uint64(0) >> 1) // 最大值
 	maxPause := time.Duration(0)
 
 	for _, pause := range mem.PauseNs {
-		if pause > 0 {
+		if pause > 0 && len(gcInfo.PauseHistory) < maxPauseHistory {
 			pauseDuration := time.Duration(pause)
 			gcInfo.PauseHistory = append(gcInfo.PauseHistory, pauseDuration)
 
@@ -470,19 +476,28 @@ func (mm *DefaultMemoryMonitor) addToHistory(memInfo MemoryInfo, gcInfo GCInfo, 
 	// 添加内存历史
 	mm.memoryHistory = append(mm.memoryHistory, memInfo)
 	if len(mm.memoryHistory) > mm.maxHistorySize {
-		mm.memoryHistory = mm.memoryHistory[1:]
+		// 创建新切片，释放旧数组内存
+		newHistory := make([]MemoryInfo, mm.maxHistorySize)
+		copy(newHistory, mm.memoryHistory[len(mm.memoryHistory)-mm.maxHistorySize:])
+		mm.memoryHistory = newHistory
 	}
 
 	// 添加GC历史
 	mm.gcHistory = append(mm.gcHistory, gcInfo)
 	if len(mm.gcHistory) > mm.maxHistorySize {
-		mm.gcHistory = mm.gcHistory[1:]
+		// 创建新切片，释放旧数组内存
+		newGCHistory := make([]GCInfo, mm.maxHistorySize)
+		copy(newGCHistory, mm.gcHistory[len(mm.gcHistory)-mm.maxHistorySize:])
+		mm.gcHistory = newGCHistory
 	}
 
 	// 添加堆历史
 	mm.heapHistory = append(mm.heapHistory, heapInfo)
 	if len(mm.heapHistory) > mm.maxHistorySize {
-		mm.heapHistory = mm.heapHistory[1:]
+		// 创建新切片，释放旧数组内存
+		newHeapHistory := make([]HeapInfo, mm.maxHistorySize)
+		copy(newHeapHistory, mm.heapHistory[len(mm.heapHistory)-mm.maxHistorySize:])
+		mm.heapHistory = newHeapHistory
 	}
 }
 
