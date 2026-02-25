@@ -14,6 +14,7 @@ package logger
 import (
 	"testing"
 
+	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -102,7 +103,7 @@ func (suite *EmptyLoggerTestSuite) TestEmptyLoggerClone() {
 	cloned := suite.logger.Clone()
 	assert.NotNil(suite.T(), cloned)
 	assert.IsType(suite.T(), &EmptyLogger{}, cloned)
-	
+
 	clonedEmpty := cloned.(*EmptyLogger)
 	assert.Equal(suite.T(), ERROR, clonedEmpty.GetLevel())
 	assert.True(suite.T(), clonedEmpty.IsShowCaller())
@@ -110,18 +111,19 @@ func (suite *EmptyLoggerTestSuite) TestEmptyLoggerClone() {
 
 // TestEmptyAdapter 测试空适配器
 func TestEmptyAdapter(t *testing.T) {
-	adapter := NewEmptyAdapter("test-adapter")
-	
+	adapterName := random.UUID()
+	adapter := NewEmptyAdapter(adapterName)
+
 	assert.NotNil(t, adapter)
-	assert.Equal(t, "test-adapter", adapter.GetAdapterName())
+	assert.Equal(t, adapterName, adapter.GetAdapterName())
 	assert.Equal(t, "1.0.0", adapter.GetAdapterVersion())
 	assert.True(t, adapter.IsHealthy())
-	
+
 	// 测试生命周期方法
 	assert.NoError(t, adapter.Initialize())
 	assert.NoError(t, adapter.Flush())
 	assert.NoError(t, adapter.Close())
-	
+
 	// 测试健康状态设置
 	adapter.SetHealthy(false)
 	assert.False(t, adapter.IsHealthy())
@@ -130,24 +132,24 @@ func TestEmptyAdapter(t *testing.T) {
 // TestEmptyWriter 测试空写入器
 func TestEmptyWriter(t *testing.T) {
 	writer := NewEmptyWriter()
-	
+
 	assert.NotNil(t, writer)
 	assert.True(t, writer.IsHealthy())
-	
+
 	// 测试写入方法
 	n, err := writer.Write([]byte("test message"))
 	assert.NoError(t, err)
 	assert.Equal(t, 12, n)
-	
+
 	// 测试级别写入
 	n, err = writer.WriteLevel(INFO, []byte("test"))
 	assert.NoError(t, err)
 	assert.Equal(t, 4, n)
-	
+
 	// 测试生命周期方法
 	assert.NoError(t, writer.Flush())
 	assert.NoError(t, writer.Close())
-	
+
 	// 测试统计信息
 	stats := writer.GetStats()
 	assert.NotNil(t, stats)
@@ -159,12 +161,12 @@ func TestEmptyHook(t *testing.T) {
 	hook := NewEmptyHook(nil)
 	assert.NotNil(t, hook)
 	assert.Len(t, hook.Levels(), 5)
-	
+
 	// 测试自定义级别
 	customLevels := []LogLevel{ERROR, FATAL}
 	hook = NewEmptyHook(customLevels)
 	assert.Equal(t, customLevels, hook.Levels())
-	
+
 	// 测试Fire方法
 	entry := &LogEntry{
 		Level:   ERROR,
@@ -173,81 +175,22 @@ func TestEmptyHook(t *testing.T) {
 	assert.NoError(t, hook.Fire(entry))
 }
 
-// TestEmptyMiddleware 测试空中间件
-func TestEmptyMiddleware(t *testing.T) {
-	middleware := NewEmptyMiddleware("test-middleware", 10)
-	
-	assert.NotNil(t, middleware)
-	assert.Equal(t, "test-middleware", middleware.GetName())
-	assert.Equal(t, 10, middleware.GetPriority())
-	
-	// 测试处理方法
-	entry := &LogEntry{
-		Level:   INFO,
-		Message: "test message",
-	}
-	
-	called := false
-	next := func(*LogEntry) error {
-		called = true
-		return nil
-	}
-	
-	err := middleware.Process(entry, next)
-	assert.NoError(t, err)
-	assert.True(t, called)
-	
-	// 测试nil next函数
-	err = middleware.Process(entry, nil)
-	assert.NoError(t, err)
-}
-
-// TestEmptyFormatter 测试空格式化器
-func TestEmptyFormatter(t *testing.T) {
-	formatter := NewEmptyFormatter()
-	
-	assert.NotNil(t, formatter)
-	assert.Equal(t, "empty", formatter.GetName())
-	
-	// 测试格式化方法
-	entry := &LogEntry{
-		Level:   INFO,
-		Message: "test message",
-	}
-	
-	result, err := formatter.Format(entry)
-	assert.NoError(t, err)
-	assert.Empty(t, result)
-}
-
 // TestGlobalEmptyInstances 测试全局空实例
 func TestGlobalEmptyInstances(t *testing.T) {
 	assert.NotNil(t, NoLogger)
 	assert.NotNil(t, DiscardLogger)
 	assert.NotNil(t, NullLogger)
-	
+
 	// 验证它们都是EmptyLogger类型
 	assert.IsType(t, &EmptyLogger{}, NoLogger)
 	assert.IsType(t, &EmptyLogger{}, DiscardLogger)
 	assert.IsType(t, &EmptyLogger{}, NullLogger)
 }
 
-// TestDisableLogging 测试禁用日志配置
-func TestDisableLogging(t *testing.T) {
-	config := DisableLogging()
-	
-	assert.NotNil(t, config)
-	assert.Greater(t, int(config.Level), int(FATAL))
-	assert.False(t, config.Colorful)
-	assert.False(t, config.ShowCaller)
-	assert.Empty(t, config.TimeFormat)
-	assert.Empty(t, config.Prefix)
-}
-
 // TestIsEmptyLogger 测试空日志器检查
 func TestIsEmptyLogger(t *testing.T) {
 	emptyLogger := NewEmptyLogger()
-	
+
 	assert.True(t, IsEmptyLogger(emptyLogger))
 	assert.True(t, IsEmptyLogger(NoLogger))
 }
@@ -257,15 +200,15 @@ func TestWrapWithEmpty(t *testing.T) {
 	regularLogger := NewEmptyLogger() // 使用EmptyLogger进行测试
 	regularLogger.SetLevel(ERROR)
 	regularLogger.SetShowCaller(true)
-	
+
 	// 包装为空实现
 	wrappedLogger := WrapWithEmpty(regularLogger)
 	assert.True(t, IsEmptyLogger(wrappedLogger))
-	
+
 	// 验证配置被保留
 	assert.Equal(t, ERROR, wrappedLogger.GetLevel())
 	assert.True(t, wrappedLogger.IsShowCaller())
-	
+
 	// 测试包装空日志器
 	alreadyEmpty := NewEmptyLogger()
 	wrapped := WrapWithEmpty(alreadyEmpty)
@@ -275,7 +218,7 @@ func TestWrapWithEmpty(t *testing.T) {
 // TestEmptyLoggerChaining 测试空日志器的链式调用
 func TestEmptyLoggerChaining(t *testing.T) {
 	logger := NewEmptyLogger()
-	
+
 	// 测试链式调用不会panic
 	assert.NotPanics(t, func() {
 		logger.
@@ -289,19 +232,19 @@ func TestEmptyLoggerChaining(t *testing.T) {
 // BenchmarkEmptyLogger 性能基准测试
 func BenchmarkEmptyLogger(b *testing.B) {
 	logger := NewEmptyLogger()
-	
+
 	b.Run("Info", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			logger.Info("benchmark message")
 		}
 	})
-	
+
 	b.Run("WithField", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			logger.WithField("key", "value").Info("benchmark message")
 		}
 	})
-	
+
 	b.Run("WithFields", func(b *testing.B) {
 		fields := map[string]interface{}{
 			"key1": "value1",

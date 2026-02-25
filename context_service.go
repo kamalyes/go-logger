@@ -34,11 +34,14 @@ const (
 	KeyTimezone      ContextKey = "timezone"
 )
 
+func (c ContextKey) String() string {
+	return string(c)
+}
+
 // Field 定义一个可提取字段
 type Field struct {
-	Key       ContextKey
-	LogName   string
-	Generator func() string
+	key       ContextKey
+	generator func() string
 }
 
 // CorrelationChain 简化后的相关链
@@ -81,11 +84,11 @@ func NewContextService(gen idgen.IDGenerator) *ContextService {
 	}
 	cs := &ContextService{idGen: gen}
 	cs.fields = []Field{
-		{KeyTraceID, "trace_id", func() string { return cs.idGen.GenerateTraceID() }},
-		{KeySpanID, "span_id", func() string { return cs.idGen.GenerateSpanID() }},
-		{KeyRequestID, "request_id", func() string { return cs.idGen.GenerateRequestID() }},
-		{KeySessionID, "session_id", func() string { return cs.idGen.GenerateCorrelationID() }},
-		{KeyCorrelationID, "correlation_id", func() string { return cs.idGen.GenerateCorrelationID() }},
+		{KeyTraceID, func() string { return cs.idGen.GenerateTraceID() }},
+		{KeySpanID, func() string { return cs.idGen.GenerateSpanID() }},
+		{KeyRequestID, func() string { return cs.idGen.GenerateRequestID() }},
+		{KeySessionID, func() string { return cs.idGen.GenerateCorrelationID() }},
+		{KeyCorrelationID, func() string { return cs.idGen.GenerateCorrelationID() }},
 	}
 	return cs
 }
@@ -117,8 +120,8 @@ func (cs *ContextService) EnsureID(ctx context.Context, key ContextKey) (context
 		return ctx, existing
 	}
 	for _, f := range cs.fields {
-		if f.Key == key && f.Generator != nil {
-			id := f.Generator()
+		if f.key == key && f.generator != nil {
+			id := f.generator()
 			ctx = cs.withValue(ctx, key, id)
 			return ctx, id
 		}
@@ -130,21 +133,20 @@ func (cs *ContextService) EnsureID(ctx context.Context, key ContextKey) (context
 func (cs *ContextService) ExtractFields(ctx context.Context) map[string]interface{} {
 	result := make(map[string]interface{})
 	for _, f := range cs.fields {
-		if v := cs.getString(ctx, f.Key); v != "" {
-			result[f.LogName] = v
+		if v := cs.getString(ctx, f.key); v != "" {
+			result[f.key.String()] = v
 		}
 	}
 	// user/session/tenant/correlation 可能未在 fields 静态数组中显式映射成日志名时补充
 	extras := []struct {
-		key  ContextKey
-		name string
+		key ContextKey
 	}{
-		{KeyUserID, "user_id"}, {KeyTenantID, "tenant_id"}, {KeyCorrelationID, "correlation_id"}, {KeySessionID, "session_id"}, {KeyTimezone, "timezone"},
+		{KeyUserID}, {KeyTenantID}, {KeyCorrelationID}, {KeySessionID}, {KeyTimezone},
 	}
 	for _, e := range extras {
-		if _, exists := result[e.name]; !exists {
+		if _, exists := result[e.key.String()]; !exists {
 			if v := cs.getString(ctx, e.key); v != "" {
-				result[e.name] = v
+				result[e.key.String()] = v
 			}
 		}
 	}

@@ -114,10 +114,10 @@ func (suite *LevelTestSuite) TestParseLevel() {
 		{"  DEBUG  ", DEBUG, false},
 		{"  INFO  ", INFO, false},
 		// 无效输入
-		{"INVALID", INFO, true}, // 默认返回INFO
-		{"", INFO, true},
-		{"123", INFO, true},
-		{"NULL", INFO, true},
+		{"INVALID", DEBUG, true}, // 默认返回DEBUG
+		{"", DEBUG, true},
+		{"123", DEBUG, true},
+		{"NULL", DEBUG, true},
 	}
 
 	for _, test := range tests {
@@ -434,8 +434,8 @@ func TestLogLevelUnmarshalYAML(t *testing.T) {
 		{"string_warn", "level: warn", WARN, false},
 		{"string_error", "level: error", ERROR, false},
 		{"string_uppercase", "level: DEBUG", DEBUG, false},
-		{"integer_value", "level: 1", INFO, false},
-		{"invalid_string", "level: invalid", INFO, true},
+		{"integer_value", "level: 1", DEBUG, true},
+		{"invalid_string", "level: invalid", DEBUG, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

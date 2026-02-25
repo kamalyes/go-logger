@@ -327,60 +327,6 @@ func (e *EmptyHook) Levels() []LogLevel {
 	return e.levels
 }
 
-// EmptyMiddleware 是 IMiddleware 接口的空实现
-type EmptyMiddleware struct {
-	name     string
-	priority int
-}
-
-// NewEmptyMiddleware 创建一个新的空中间件
-func NewEmptyMiddleware(name string, priority int) *EmptyMiddleware {
-	return &EmptyMiddleware{
-		name:     name,
-		priority: priority,
-	}
-}
-
-// Process 处理日志条目（空实现，直接调用下一个处理器）
-func (e *EmptyMiddleware) Process(entry *LogEntry, next func(*LogEntry) error) error {
-	if next != nil {
-		return next(entry)
-	}
-	return nil
-}
-
-// GetName 获取中间件名称
-func (e *EmptyMiddleware) GetName() string {
-	return e.name
-}
-
-// GetPriority 获取中间件优先级
-func (e *EmptyMiddleware) GetPriority() int {
-	return e.priority
-}
-
-// EmptyFormatter 是 IFormatter 接口的空实现
-type EmptyFormatter struct {
-	name string
-}
-
-// NewEmptyFormatter 创建一个新的空格式化器
-func NewEmptyFormatter() *EmptyFormatter {
-	return &EmptyFormatter{
-		name: "empty",
-	}
-}
-
-// Format 格式化日志条目（返回空字节）
-func (e *EmptyFormatter) Format(entry *LogEntry) ([]byte, error) {
-	return []byte{}, nil
-}
-
-// GetName 获取格式化器名称
-func (e *EmptyFormatter) GetName() string {
-	return e.name
-}
-
 // 全局空日志实例
 var (
 	// NoLogger 全局的空日志实例，用于禁用所有日志输出
@@ -392,18 +338,6 @@ var (
 	// NullLogger 空日志实例，用于测试场景
 	NullLogger ILogger = NewEmptyLogger()
 )
-
-// DisableLogging 创建一个完全禁用日志的配置
-func DisableLogging() *LogConfig {
-	return &LogConfig{
-		Level:      FATAL + 1, // 设置一个比FATAL更高的级别，禁用所有日志
-		Output:     NewEmptyWriter(),
-		Colorful:   false,
-		ShowCaller: false,
-		TimeFormat: "",
-		Prefix:     "",
-	}
-}
 
 // IsEmptyLogger 检查给定的logger是否是空日志实现
 func IsEmptyLogger(logger ILogger) bool {
