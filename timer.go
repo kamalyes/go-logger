@@ -26,11 +26,74 @@ type Timer struct {
 	mutex       sync.Mutex
 }
 
-// 全局计时器管理
-var (
-	timers      = make(map[string]*Timer)
-	timersMutex sync.RWMutex
+// 全局计时器管理（使用 sync.Map 优化并发性能）
+var timers sync.Map
+
+// 计时器配置
+const (
+	defaultTimerMaxAge     = 24 * time.Hour  // 默认最大存活时间
+	defaultCleanupInterval = 5 * time.Minute // 默认清理间隔
 )
+
+var (
+	timerCleanupOnce sync.Once
+	timerMaxAge      = defaultTimerMaxAge
+	cleanupInterval  = defaultCleanupInterval
+)
+
+// init 初始化自动清理
+func init() {
+	startTimerCleanup()
+}
+
+// startTimerCleanup 启动自动清理 goroutine
+func startTimerCleanup() {
+	timerCleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(cleanupInterval)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				cleanupExpiredTimers()
+			}
+		}()
+	})
+}
+
+// cleanupExpiredTimers 清理过期的计时器（内部使用）
+func cleanupExpiredTimers() int {
+	count := 0
+	now := time.Now()
+
+	timers.Range(func(key, value any) bool {
+		timer := value.(*Timer)
+		timer.mutex.Lock()
+		age := now.Sub(timer.startTime)
+		timer.mutex.Unlock()
+
+		if age > timerMaxAge {
+			timers.Delete(key)
+			count++
+		}
+		return true
+	})
+
+	return count
+}
+
+// SetTimerMaxAge 设置计时器最大存活时间（可选配置）
+func SetTimerMaxAge(maxAge time.Duration) {
+	if maxAge > 0 {
+		timerMaxAge = maxAge
+	}
+}
+
+// SetTimerCleanupInterval 设置清理间隔（可选配置）
+func SetTimerCleanupInterval(interval time.Duration) {
+	if interval > 0 {
+		cleanupInterval = interval
+	}
+}
 
 // NewTimer 创建新的计时器
 func NewTimer(logger ILogger, label string, indentLevel int) *Timer {
@@ -45,10 +108,8 @@ func NewTimer(logger ILogger, label string, indentLevel int) *Timer {
 	indent := strings.Repeat("  ", indentLevel)
 	logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: 计时开始", indent, label))
 
-	// 存储到全局映射
-	timersMutex.Lock()
-	timers[label] = timer
-	timersMutex.Unlock()
+	// 存储到 sync.Map（优化：避免全局锁竞争）
+	timers.Store(label, timer)
 
 	return timer
 }
@@ -66,10 +127,8 @@ func (t *Timer) End() time.Duration {
 	timeStr := formatDuration(elapsed)
 	t.logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: %s", indent, t.label, timeStr))
 
-	// 从全局映射中移除
-	timersMutex.Lock()
-	delete(timers, t.label)
-	timersMutex.Unlock()
+	// 从 sync.Map 中移除（优化：避免全局锁竞争）
+	timers.Delete(t.label)
 
 	return elapsed
 }
@@ -117,39 +176,33 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-// ============================================================================
-// 全局计时器方法
-// ============================================================================
+// CleanupExpiredTimers 手动清理超过指定时间未结束的计时器
+func CleanupExpiredTimers(maxAge time.Duration) int {
+	count := 0
+	now := time.Now()
 
-// Time 使用默认日志器创建计时器
-func Time(label string) *Timer {
-	return NewTimer(defaultLogger, label, 0)
+	timers.Range(func(key, value any) bool {
+		timer := value.(*Timer)
+		timer.mutex.Lock()
+		age := now.Sub(timer.startTime)
+		timer.mutex.Unlock()
+
+		if age > maxAge {
+			timers.Delete(key)
+			count++
+		}
+		return true
+	})
+
+	return count
 }
 
-// TimeEnd 结束指定标签的计时器
-func TimeEnd(label string) time.Duration {
-	timersMutex.RLock()
-	timer, exists := timers[label]
-	timersMutex.RUnlock()
-
-	if !exists {
-		defaultLogger.WarnMsg(fmt.Sprintf("⚠️  计时器 '%s' 不存在", label))
-		return 0
-	}
-
-	return timer.End()
-}
-
-// TimeLog 输出指定标签计时器的当前耗时
-func TimeLog(label string, msg string, args ...interface{}) time.Duration {
-	timersMutex.RLock()
-	timer, exists := timers[label]
-	timersMutex.RUnlock()
-
-	if !exists {
-		defaultLogger.WarnMsg(fmt.Sprintf("⚠️  计时器 '%s' 不存在", label))
-		return 0
-	}
-
-	return timer.Log(msg, args...)
+// GetActiveTimersCount 获取当前活跃的计时器数量
+func GetActiveTimersCount() int {
+	count := 0
+	timers.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }

@@ -110,7 +110,6 @@ type ILogger interface {
 	WithContext(ctx context.Context) ILogger
 
 	// 实用方法
-	Clone() ILogger
 	Print(args ...interface{})                 // 兼容标准log包
 	Printf(format string, args ...interface{}) // 兼容标准log包
 	Println(args ...interface{})               // 兼容标准log包

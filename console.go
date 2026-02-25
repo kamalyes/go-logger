@@ -41,7 +41,7 @@ func (l *Logger) NewConsoleGroup() *ConsoleGroup {
 		logger:          l,
 		indentLevel:     0,
 		collapsed:       false,
-		collapsedLevels: make([]bool, 0),
+		collapsedLevels: make([]bool, 0, 16), // 预分配 16 层嵌套容量，减少扩容
 	}
 }
 
@@ -468,28 +468,4 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 	sb.WriteString("┘")
 
 	return sb.String()
-}
-
-// ============================================================================
-// 全局便捷方法
-// ============================================================================
-
-// Group 使用默认日志器创建分组
-func Group(label string, args ...interface{}) *ConsoleGroup {
-	cg := defaultLogger.NewConsoleGroup()
-	cg.Group(label, args...)
-	return cg
-}
-
-// GroupCollapsed 使用默认日志器创建折叠分组
-func GroupCollapsed(label string, args ...interface{}) *ConsoleGroup {
-	cg := defaultLogger.NewConsoleGroup()
-	cg.GroupCollapsed(label, args...)
-	return cg
-}
-
-// Table 使用默认日志器显示表格
-func Table(data interface{}) {
-	cg := defaultLogger.NewConsoleGroup()
-	cg.Table(data)
 }

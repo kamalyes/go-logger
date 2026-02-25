@@ -12,6 +12,8 @@ package logger
 
 import (
 	"io"
+	"os"
+	"time"
 
 	"github.com/kamalyes/go-toolbox/pkg/mathx"
 )
@@ -29,8 +31,12 @@ const (
 
 // 默认配置常量
 const (
-	DefaultMaxSize  = 100 * 1024 * 1024 // 默认最大文件大小 100MB
-	DefaultMaxFiles = 5                 // 默认最大文件数
+	DefaultMaxSize        = 100 * 1024 * 1024   // 默认最大文件大小 100MB
+	DefaultMaxFiles       = 5                   // 默认最大文件数
+	DefaultFilePermission = 0644                // 默认文件权限
+	DefaultDirPermission  = 0755                // 默认目录权限
+	DefaultMaxAge         = 30 * 24 * time.Hour // 默认最大保留时间 30天
+	DefaultBufferSize     = 4096                // 默认缓冲区大小 4KB
 )
 
 // 错误消息常量
@@ -41,23 +47,25 @@ const (
 
 // WriterConfig Writer 配置
 type WriterConfig struct {
-	Type     OutputType `json:"type" yaml:"type"`           // 输出类型
-	FilePath string     `json:"file_path" yaml:"file_path"` // 文件路径
-	MaxSize  int64      `json:"max_size" yaml:"max_size"`   // 最大文件大小(字节)
-	MaxFiles int        `json:"max_files" yaml:"max_files"` // 最大文件数
-	MaxAge   int        `json:"max_age" yaml:"max_age"`     // 最大保存天数
-	Compress bool       `json:"compress" yaml:"compress"`   // 是否压缩
-	Output   io.Writer  `json:"-" yaml:"-"`                 // 自定义输出
+	Type       OutputType  `json:"type" yaml:"type"`               // 输出类型
+	FilePath   string      `json:"file_path" yaml:"file_path"`     // 文件路径
+	MaxSize    int64       `json:"max_size" yaml:"max_size"`       // 最大文件大小(字节)
+	MaxFiles   int         `json:"max_files" yaml:"max_files"`     // 最大文件数
+	MaxAge     int         `json:"max_age" yaml:"max_age"`         // 最大保存天数
+	Compress   bool        `json:"compress" yaml:"compress"`       // 是否压缩
+	Permission os.FileMode `json:"permission" yaml:"permission"`   // 文件权限
+	BufferSize int         `json:"buffer_size" yaml:"buffer_size"` // 缓冲区大小
+	Output     io.Writer   `json:"-" yaml:"-"`                     // 自定义输出
 }
 
 // CreateWriter 根据配置创建 Writer
 func CreateWriter(config *WriterConfig) (IWriter, error) {
 	if config == nil {
-		return NewConsoleWriter(nil), nil
+		return NewConsoleWriter(), nil
 	}
 
 	switch config.Type {
-	case OutputConsole, OutputStdout:
+	case OutputConsole, OutputStdout, OutputStderr:
 		return createConsoleWriter(config), nil
 
 	case OutputFile:
@@ -67,16 +75,26 @@ func CreateWriter(config *WriterConfig) (IWriter, error) {
 		return createRotateWriter(config)
 
 	default:
-		return NewConsoleWriter(nil), nil
+		return NewConsoleWriter(), nil
 	}
 }
 
 // createConsoleWriter 创建控制台 Writer
 func createConsoleWriter(config *WriterConfig) IWriter {
+	// 如果指定了自定义输出，使用自定义输出
 	if config.Output != nil {
-		return NewConsoleWriter(config.Output)
+		return NewConsoleWriter(WithConsoleOutput(config.Output))
 	}
-	return NewConsoleWriter(nil)
+
+	// 根据类型选择默认输出
+	switch config.Type {
+	case OutputStderr:
+		return NewConsoleWriter(WithConsoleOutput(os.Stderr))
+	case OutputStdout:
+		return NewConsoleWriter(WithConsoleOutput(os.Stdout))
+	default: // OutputConsole 或其他
+		return NewConsoleWriter() // 默认使用 stdout
+	}
 }
 
 // createFileWriter 创建文件 Writer
@@ -84,7 +102,16 @@ func createFileWriter(config *WriterConfig) (IWriter, error) {
 	if config.FilePath == "" {
 		return nil, NewConfigError(ErrInvalidInput, ErrMsgFilePathEmpty)
 	}
-	return NewFileWriter(config.FilePath), nil
+
+	opts := []FileWriterOption{
+		WithFileWriterPath(config.FilePath),
+	}
+
+	if config.Permission > 0 {
+		opts = append(opts, WithFilePermission(config.Permission))
+	}
+
+	return NewFileWriter(opts...), nil
 }
 
 // createRotateWriter 创建轮转文件 Writer
@@ -92,64 +119,27 @@ func createRotateWriter(config *WriterConfig) (IWriter, error) {
 	if config.FilePath == "" {
 		return nil, NewConfigError(ErrInvalidInput, ErrMsgRotatePathEmpty)
 	}
+
 	maxSize := mathx.IfNotZero(config.MaxSize, DefaultMaxSize)
 	maxFiles := mathx.IfNotZero(config.MaxFiles, DefaultMaxFiles)
-	return NewRotateWriter(config.FilePath, maxSize, maxFiles), nil
-}
 
-// AddWriterFromConfig 根据配置添加 Writer 到 Builder
-func AddWriterFromConfig(builder *LoggerBuilder, config *WriterConfig) error {
-	if config == nil {
-		addConsoleWriter(builder)
-		return nil
+	opts := []RotateWriterOption{
+		WithFilePath(config.FilePath),
+		WithMaxSize(maxSize),
+		WithMaxFiles(maxFiles),
 	}
 
-	switch config.Type {
-	case OutputConsole, OutputStdout:
-		addConsoleWriter(builder)
-
-	case OutputFile:
-		return addFileWriter(builder, config)
-
-	case OutputRotate:
-		return addRotateWriter(builder, config)
-
-	default:
-		addConsoleWriter(builder)
+	if config.MaxAge > 0 {
+		opts = append(opts, WithMaxAge(time.Duration(config.MaxAge)*24*time.Hour))
 	}
 
-	return nil
-}
+	if config.Compress {
+		opts = append(opts, WithCompress(true))
+	}
 
-// addConsoleWriter 添加控制台 Writer 到 Builder
-func addConsoleWriter(builder *LoggerBuilder) {
-	builder.WithWriter("console", nil)
-}
+	if config.Permission > 0 {
+		opts = append(opts, WithRotatePermission(config.Permission))
+	}
 
-// addFileWriter 添加文件 Writer 到 Builder
-func addFileWriter(builder *LoggerBuilder, config *WriterConfig) error {
-	if config.FilePath == "" {
-		return NewConfigError(ErrInvalidInput, ErrMsgFilePathEmpty)
-	}
-	writerConfig := map[string]any{
-		"file_path": config.FilePath,
-	}
-	builder.WithWriter("file", writerConfig)
-	return nil
-}
-
-// addRotateWriter 添加轮转文件 Writer 到 Builder
-func addRotateWriter(builder *LoggerBuilder, config *WriterConfig) error {
-	if config.FilePath == "" {
-		return NewConfigError(ErrInvalidInput, ErrMsgRotatePathEmpty)
-	}
-	maxSize := mathx.IfNotZero(config.MaxSize, DefaultMaxSize)
-	maxFiles := mathx.IfNotZero(config.MaxFiles, DefaultMaxFiles)
-	writerConfig := map[string]any{
-		"file_path": config.FilePath,
-		"max_size":  maxSize,
-		"max_files": maxFiles,
-	}
-	builder.WithWriter("rotate", writerConfig)
-	return nil
+	return NewRotateWriter(opts...), nil
 }

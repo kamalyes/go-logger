@@ -1,6 +1,6 @@
 # Go Logger - 企业级高性能日志库
 
-> `go-logger` 是一个现代化、高性能的 Go 日志库，专为企业级应用设计。它提供了强大的模块化架构、内存监控、性能分析、分布式追踪等企业级功能，并通过极致性能优化实现了**业界领先的性能表现**。
+> `go-logger` 是一个现代化、高性能的 Go 日志库，专为企业级应用设计。它提供了强大的结构化日志、分布式追踪、Console 风格日志等企业级功能，并通过极致性能优化实现了出色的性能表现。
 
 [![stable](https://img.shields.io/badge/stable-stable-green.svg)](https://github.com/kamalyes/go-logger)
 [![license](https://img.shields.io/github/license/kamalyes/go-logger)]()
@@ -19,8 +19,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/kamalyes/go-logger?status.svg)](https://pkg.go.dev/github.com/kamalyes/go-logger?tab=doc)
 [![Sourcegraph](https://sourcegraph.com/github.com/kamalyes/go-logger/-/badge.svg)](https://sourcegraph.com/github.com/kamalyes/go-logger?badge)
 
-
-
 ## 📚 文档导航
 
 ### 📖 官方文档
@@ -28,160 +26,89 @@
 - [📖 API 文档](https://pkg.go.dev/github.com/kamalyes/go-logger)
 - [📊 代码覆盖率](https://codecov.io/gh/kamalyes/go-logger)
 
-### 📋 技术文档
-- 📊 **[性能详解](docs/PERFORMANCE.md)** - 深入了解性能优化技术和基准测试结果
-- 🔄 **[迁移指南](docs/MIGRATION.md)** - 从其他日志库迁移的完整指南
-- 🎯 **[Context使用指南](docs/CONTEXT_USAGE.md)** - 分布式系统上下文管理和链路追踪
-- 🔌 **[自定义上下文提取器](docs/CUSTOM_CONTEXT_EXTRACTOR.md)** - 灵活提取和自定义上下文信息
-- ↩️ **[返回错误日志](docs/RETURN_ERROR.md)** - 简化错误处理的日志方法
-- 🎨 **[Console 风格日志](docs/CONSOLE_USAGE.md)** - JavaScript Console 风格的分组、表格和计时器功能
-- 📝 **[更新日志](./CHANGELOG.md)** - 版本更新和功能变更记录
-- 🔧 **[配置指南](docs/CONFIGURATION.md)** - 完整配置选项和最佳实践
-- 🧩 **[适配器系统](docs/ADAPTERS.md)** - 适配器完整指南和自定义开发
-- 📊 **[监控系统](docs/MONITORING.md)** - 内存监控、性能分析和告警系统
-- 🎨 **[格式化器](docs/FORMATTERS.md)** - 日志格式化器详解和自定义开发
-
-### 🔗 代码资源
-- 📋 **[示例代码](examples/README.md)** - 丰富的使用示例和最佳实践
-- 🧪 **[基准测试](benchmark_test.go)** - 性能测试和对比分析
-- ⚡ **[极速日志器](ultra_fast_logger.go)** - 极致性能实现源码
-
 ### 💬 社区支持
 - [🐛 问题反馈](https://github.com/kamalyes/go-logger/issues)
 - [💬 讨论区](https://github.com/kamalyes/go-logger/discussions)
 
 ## 🚀 为什么选择 go-logger？
 
-### ⚡ 极致性能 
-- **🏆 业界领先**: 相比标准库 slog **快 7.7倍** (75.8ns vs 585.2ns)
-- **💾 内存优化**: **83% 内存减少** (144B → 24B)，**50% 分配减少** (2 → 1 allocs)
-- **🔧 分层设计**: 三层性能架构满足不同性能需求
-- **📊 零开销**: 级别过滤接近零性能开销
+### ⚡ 核心特性
+
+- **🎯 零依赖设计**: 纯 Go 实现，无外部依赖，轻量高效
+- **📊 结构化日志**: 支持键值对、字段映射、对象自动解析等多种结构化方式
+- **🔍 分布式追踪**: 内置 Context 服务，支持 TraceID、RequestID、CorrelationID 等链路追踪
+- **🎨 Console 风格**: JavaScript Console 风格的分组、表格、计时器功能
+- **🔌 灵活扩展**: 自定义上下文提取器、格式化器、写入器、钩子等
+- **⚡ 高性能**: 对象池、零拷贝、原子操作等性能优化
+- **🛡️ 并发安全**: 完善的并发控制，适合高并发场景
 
 ### 核心功能
-- **📊 内存监控系统**：实时监控内存使用、GC性能、堆分析，支持内存泄漏检测
-- **🔍 分布式追踪**：统一的Context服务架构，支持TraceID、SpanID、CorrelationID等多维度追踪
-- **🔌 自定义上下文提取器**：灵活的上下文信息提取机制，支持完全自定义链路追踪字段
-- **🎯 多级日志系统**：支持24种日志级别，从TRACE到PROFILING，满足不同场景需求
-- **📈 性能监控**：实时统计操作性能、延迟分析、吞吐量监控
-- **⚡ 架构重构**：Context管理代码减少88%，从1059行优化到128行，性能显著提升
+
+#### 📝 多种日志方式
+
+- **Printf 风格**: `Info(format, args...)` / `Infof(format, args...)`
+- **纯文本**: `InfoMsg(msg)` - 单个消息，无格式化开销
+- **键值对**: `InfoKV(msg, key, value, ...)` - 结构化日志
+- **字段映射**: `InfoWithFields(msg, fields)` - map 方式
+- **对象解析**: `InfoKV(msg, struct)` - 自动解析结构体为键值对
+- **多行日志**: `InfoLines(line1, line2, ...)` - 自动处理多行
+- **返回错误**: `InfoReturn(format, args...)` - 记录日志并返回错误
+
+#### 🔍 分布式追踪
+
+- **统一 Context 服务**: 集中管理链路追踪 ID
+- **多维度追踪**: TraceID、RequestID、SpanID、CorrelationID
+- **自动提取**: 从 context.Value 和 gRPC metadata 自动提取
+- **自定义提取器**: 灵活的上下文信息提取机制
+- **链路关联**: CorrelationChain 支持链路关联和指标收集
+
+#### 🎨 Console 风格日志
+
+- **日志分组**: 支持嵌套分组和折叠分组
+- **表格渲染**: 自动对齐、美化边框、智能列宽
+- **计时器**: 支持中间检查点和自动格式化
+- **Context 集成**: 分组内支持带上下文的日志
+
+#### 🎯 多级日志系统
+
+- **24 种日志级别**: 
+  - 基础级别（7个）：TRACE(-1) → DEBUG(0) → INFO(1) → WARN(2) → ERROR(3) → FATAL(4) → OFF(99)
+  - 系统级别（7个）：SYSTEM(100) → KERNEL(101) → DRIVER(102) → APPLICATION(103) → SERVICE(104) → COMPONENT(105) → MODULE(106)
+  - 业务级别（4个）：BUSINESS(200) → TRANSACTION(201) → WORKFLOW(202) → PROCESS(203)
+  - 安全级别（4个）：SECURITY(300) → AUDIT(301) → COMPLIANCE(302) → THREAT(303)
+  - 性能级别（4个）：PERFORMANCE(400) → METRIC(401) → BENCHMARK(402) → PROFILING(403)
+- **级别过滤**: 动态调整日志级别
+- **特殊日志类型**: Success、Loading、Config、Start、Stop、Database、Network、Security、Cache、Environment
+- **性能日志**: 自动分级（EXCELLENT/FAST/NORMAL/SLOW/VERY_SLOW）
+- **进度日志**: 百分比和进度条显示
+- **健康检查**: 服务健康状态监控
+- **审计日志**: 用户操作审计追踪
 
 ### 企业级功能
-- **🛡️ 内存安全**：智能内存管理、GC优化、内存压力检测与自动释放
-- **📊 统计分析**：详细的运行时统计、性能指标收集、趋势分析
-- **🔧 配置管理**：细粒度配置系统，支持动态配置更新
-- **⚙️ 适配器模式**：支持多种输出适配器，灵活扩展输出目标
-- **🧪 完善测试**：基于测试套件的全面测试，覆盖率90%+
 
-### 🔌 自定义上下文提取器
+- **🔧 灵活配置**: Builder 模式链式调用，支持动态配置
+- **⚙️ 适配器模式**: 支持多种输出适配器（Console、File、Rotate、Buffered、Multi）
+- **🎯 错误处理**: 返回错误的日志方法，简化错误处理流程
+- **📊 统计分析**: 内置日志统计，支持运行时指标收集
+- **🧪 完善测试**: 全面的测试覆盖，保证代码质量
+- **🔌 接口丰富**: 支持多种日志框架的参数格式
 
-支持灵活提取和自定义上下文信息，满足不同场景需求：
+## 🏗️ 项目结构
 
-**核心能力**：
-- 🎯 **预定义提取器**: SimpleTraceIDExtractor、SimpleRequestIDExtractor、NoOpContextExtractor
-- 🔧 **自定义字段**: CustomFieldExtractor - 从 context 或 gRPC metadata 提取任意字段
-- 🔗 **链式组合**: ChainContextExtractors - 组合多个提取器
-- 🏗️ **构建器模式**: ContextExtractorBuilder - 流式 API 构建复杂提取器
-- ⚡ **完全自定义**: 支持自定义 ContextExtractor 函数
-
-**性能表现**: NoOp (137ns) | 默认 (466ns) | 链式 (430ns)
-
-**适用场景**: 微服务追踪 | 多租户系统 | API 网关 | 分布式链路追踪
-
-📖 **[查看完整文档和示例 →](docs/CUSTOM_CONTEXT_EXTRACTOR.md)**
-
-### 监控能力 ⚡ **极致性能优化**
-- **🔥 内存实时监控**: 堆内存、栈内存、GC统计、对象计数
-- **📊 性能分析**: 操作延迟、吞吐量、错误率统计  
-- **🛡️ 泄漏检测**: 智能内存泄漏检测、趋势分析、告警机制
-- **💡 健康检查**: 系统健康状态监控、自动优化建议
-- **🎯 分层架构**: 根据性能需求选择不同监控级别
-  - **UltraLight**: 3.134ns/op - 极致性能，原子操作
-  - **Optimized**: 3.094ns/op - 缓存优化，零分配  
-  - **Standard**: 24.075μs/op - 全功能监控
-
-### 分层性能架构
-
-```go
-// 🏆 极致性能 - UltraFastLogger (推荐)
-ultraLogger := logger.NewUltraFast()
-
-// 或使用完整配置
-config := logger.DefaultConfig()
-config.Level = logger.INFO
-config.Colorful = false
-config.ShowCaller = false
-ultraLogger = logger.NewUltraFastLogger(config)
-
-// ⚡ 高性能 - 优化版标准Logger  
-optimizedLogger := logger.NewOptimized()
-
-// 🛡️ 全功能 - 企业级Logger (默认)
-fullLogger := logger.New()
-
-// 或使用完整配置
-enterpriseConfig := logger.DefaultConfig()
-enterpriseConfig.Level = logger.INFO
-enterpriseConfig.ShowCaller = true
-enterpriseConfig.Colorful = true
-fullLogger = logger.NewLogger(enterpriseConfig)
-```
-
-### 🛡️ 监控架构 - 三层性能设计
-
-```go
-// ⚡ 超轻量级监控 - 3.134ns/op，零分配
-ultraMonitor := metrics.NewUltraLightMonitor()
-ultraMonitor.Enable()
-done := ultraMonitor.Track()
-// ... 业务逻辑 ...
-done(nil) // 完成追踪
-
-// 🔥 优化监控 - 3.094ns/op，智能缓存
-optimizedConfig := metrics.OptimizedConfig{
-    CacheExpiry:     100 * time.Millisecond,
-    EnableCaching:   true,
-    LightweightMode: true,
-}
-monitor := metrics.NewOptimizedMonitor(optimizedConfig)
-monitor.Start()
-heap, stack, used, numGC := monitor.FastMemoryInfo()
-
-// 📊 内存追踪器 - 53ns/op，原子操作
-tracker := metrics.NewMemoryTracker(512) // 512MB阈值
-exceeded := tracker.Update(heapBytes)
-if exceeded {
-    log.Warn("Memory threshold exceeded")
-}
-
-// 🎯 智能健康检查
-healthy, pressure := monitor.QuickCheck()
-fmt.Printf("系统健康: %v, 内存压力: %s", healthy, pressure)
-```
-
-📖 **[查看详细性能分析 →](docs/PERFORMANCE.md)**
-
-## 🏗️ 模块化架构
 ```
 go-logger/
-├── config/              # 配置管理模块
-│   ├── base.go          # 基础配置
-│   ├── adapter.go       # 适配器配置
-│   ├── output.go        # 输出配置
-│   └── level.go         # 日志级别配置
-├── context_service.go   # 统一上下文服务（新架构核心）
-├── level/               # 日志级别管理
-│   ├── constants.go     # 级别常量定义
-│   └── manager.go       # 级别管理器
-├── metrics/             # 监控指标模块
-│   ├── stats.go         # 统计收集
-│   ├── performance.go   # 性能监控
-│   └── memory.go        # 内存监控
-├── docs/                # 文档目录
-│   ├── CONTEXT_USAGE.md # Context使用指南
-│   ├── PERFORMANCE.md   # 性能详解
-│   └── MIGRATION.md     # 迁移指南
-└── examples/            # 示例代码
+├── logger.go            # 核心日志实现
+├── types.go             # 类型定义和构造函数
+├── interfaces.go        # 接口定义
+├── level.go             # 日志级别管理（24种级别）
+├── context_service.go   # 上下文服务（链路追踪）
+├── console.go           # Console 风格日志
+├── timer.go             # 计时器实现
+├── writer.go            # 写入器实现
+├── output.go            # 输出管理
+├── errors.go            # 错误定义
+├── empty.go             # 空实现（用于禁用日志）
+└── *_test.go            # 测试文件
 ```
 
 ## 📦 快速开始
@@ -212,125 +139,162 @@ go get -u github.com/kamalyes/go-logger
 package main
 
 import (
-    "context"
-    "github.com/kamalyes/go-logger"
+	"context"
+	"github.com/kamalyes/go-logger"
 )
 
 func main() {
-    // 🏆 极致性能版本 (推荐高并发场景)
-    ultraLogger := logger.NewUltraFast()
-    ultraLogger.Info("High performance logging")
-    
-    // 结构化日志 - 键值对方式
-    ultraLogger.InfoKV("High performance with fields", "key", "value")
-    
-    // 🎯 结构化日志 - 对象方式 (自动解析)
-    type User struct {
-        ID    int    `json:"id"`
-        Name  string `json:"name"`
-        Email string `json:"email"`
-    }
-    user := User{ID: 1001, Name: "张三", Email: "user@example.com"}
-    
-    // 直接传递对象，自动解析为键值对
-    ultraLogger.InfoKV("用户登录", user)
-    
-    // 也支持 map
-    data := map[string]interface{}{
-        "request_id": "req-123",
-        "method":     "POST",
-        "status":     200,
-    }
-    ultraLogger.InfoKV("API 请求", data)
-    
-    // ⚡ 优化版标准Logger
-    optimizedLogger := logger.NewOptimized()
-    optimizedLogger.Info("Optimized logging with features")
-    
-    // 🛡️ 全功能企业版 (默认)
-    fullLogger := logger.New()
-    fullLogger.Info("Full featured logging")
-    
-    // 🎨 Console 风格日志 - JavaScript 风格的分组、表格和计时器
-    cg := fullLogger.NewConsoleGroup()
-    
-    // 📊 分组日志 - 组织相关日志输出
-    cg.Group("🚀 应用启动流程")
-    cg.Info("开始初始化...")
-    
-    // 📋 表格展示 - 美化配置信息
-    config := map[string]interface{}{
-        "环境":   "生产环境",
-        "端口":   8080,
-        "调试模式": false,
-    }
-    cg.Table(config)
-    // 输出:
-    //   ┌──────────┬────────────┐
-    //   │ Key      │ Value      │
-    //   ├──────────┼────────────┤
-    //   │ 环境      │ 生产环境   │
-    //   │ 端口      │ 8080       │
-    //   │ 调试模式   │ false     │
-    //   └──────────┴────────────┘
-    
-    // ⏱️  计时器 - 测量操作耗时
-    timer := cg.Time("数据库连接")
-    // ... 执行数据库连接 ...
-    timer.End() // 输出: ⏱️  数据库连接: 123.45ms
-    
-    cg.Info("✅ 启动完成")
-    cg.GroupEnd()
-    
-    // 📖 查看完整 Console 功能文档: docs/CONSOLE_USAGE.md
-    
-    // 🎯 使用现有的Context ID管理
-    ctx := context.Background()
-    
-    // 直接使用日志记录（结构化字段通过WithField添加）
-    fullLogger.WithField("trace_id", "trace-123").
-               WithField("user_id", "user-456").
-               Info("带上下文的日志")
-    
-    // 🔌 自定义上下文提取器 (灵活提取链路信息)
-    ctx = context.WithValue(ctx, "trace_id", "trace-12345")
-    ctx = context.WithValue(ctx, "request_id", "req-67890")
-    
-    // 使用默认提取器
-    ultraLogger.InfoContext(ctx, "用户登录成功")
-    // 输出: [TraceID=trace-12345 RequestID=req-67890] 用户登录成功
-    
-    // 自定义提取器（详见文档）
-    extractor := logger.NewContextExtractorBuilder().
-        AddTraceID().
-        AddRequestID().
-        AddContextValue("user_id", "User").
-        Build()
-    ultraLogger.SetContextExtractor(extractor)
+	// 创建日志实例
+	log := logger.NewLogger()
+	
+	// 基础日志
+	log.Info("应用启动")
+	log.Debug("调试信息: %s", "debug message")
+	log.Warn("警告信息")
+	log.Error("错误信息")
+	
+	// 结构化日志 - 键值对方式
+	log.InfoKV("用户登录", "user_id", 1001, "username", "张三")
+	
+	// 🎯 结构化日志 - 对象方式 (自动解析)
+	type User struct {
+		ID    int    `json:"id"`
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	user := User{ID: 1001, Name: "张三", Email: "user@example.com"}
+	
+	// 直接传递对象，自动解析为键值对
+	log.InfoKV("用户信息", user)
+	// 输出: 用户信息 {id: 1001, name: 张三, email: user@example.com}
+	
+	// 也支持 map
+	data := map[string]interface{}{
+		"request_id": "req-123",
+		"method":     "POST",
+		"status":     200,
+	}
+	log.InfoKV("API 请求", data)
+	
+	// 字段映射方式
+	log.InfoWithFields("订单创建", map[string]interface{}{
+		"order_id": "ORD-12345",
+		"amount":   99.99,
+		"user_id":  1001,
+	})
+	
+	// 🎯 带上下文的日志（链路追踪）
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, logger.KeyTraceID, "trace-12345")
+	ctx = context.WithValue(ctx, logger.KeyRequestID, "req-67890")
+	
+	log.InfoContext(ctx, "用户登录成功")
+	// 输出: [TraceID=trace-12345 RequestID=req-67890] 用户登录成功
+	
+	// 链式调用添加字段
+	log.WithField("trace_id", "trace-123").
+		WithField("user_id", "user-456").
+		Info("带字段的日志")
+	
+	// 🎨 Console 风格日志
+	cg := log.NewConsoleGroup()
+	
+	// 📊 分组日志
+	cg.Group("🚀 应用启动流程")
+	cg.Info("开始初始化...")
+	
+	// 📋 表格展示
+	config := map[string]interface{}{
+		"环境":   "生产环境",
+		"端口":   8080,
+		"调试模式": false,
+	}
+	cg.Table(config)
+	// 输出美观的表格:
+	//   ┌──────────┬────────────┐
+	//   │ Key      │ Value      │
+	//   ├──────────┼────────────┤
+	//   │ 环境      │ 生产环境   │
+	//   │ 端口      │ 8080       │
+	//   │ 调试模式   │ false     │
+	//   └──────────┴────────────┘
+	
+	// ⏱️  计时器
+	timer := cg.Time("数据库连接")
+	// ... 执行数据库连接 ...
+	timer.End() // 输出: ⏱️  数据库连接: 123.45ms
+	
+	cg.Info("✅ 启动完成")
+	cg.GroupEnd()
 }
+```
+
+### 链式配置
+
+```go
+// Builder 模式链式调用
+log := logger.NewLogger().
+	WithLevel(logger.INFO).
+	WithShowCaller(true).
+	WithColorful(true).
+	WithPrefix("[MyApp]")
+
+log.Info("配置完成")
+```
+
+### 自定义上下文提取器
+
+```go
+// 自定义提取器，从 context 提取特定字段
+extractor := func(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	
+	var parts []string
+	if traceID, ok := ctx.Value("trace_id").(string); ok {
+		parts = append(parts, "TraceID="+traceID)
+	}
+	if userID, ok := ctx.Value("user_id").(string); ok {
+		parts = append(parts, "UserID="+userID)
+	}
+	
+	if len(parts) > 0 {
+		return "[" + strings.Join(parts, " ") + "] "
+	}
+	return ""
+}
+
+log.SetContextExtractor(extractor)
+
+ctx := context.WithValue(context.Background(), "trace_id", "trace-123")
+ctx = context.WithValue(ctx, "user_id", "user-456")
+
+log.InfoContext(ctx, "自定义上下文")
+// 输出: [TraceID=trace-123 UserID=user-456] 自定义上下文
 ```
 
 ### 🎨 Console 风格日志功能
 
-类似 JavaScript `console` 的日志分组、表格和计时器功能,让日志输出更加结构化和易读。
+类似 JavaScript `console` 的日志分组、表格和计时器功能，让日志输出更加结构化和易读。
 
 ```go
-log := logger.NewLogger(logger.DefaultConfig())
+log := logger.NewLogger()
 cg := log.NewConsoleGroup()
 
 // 📊 日志分组 - 组织相关日志
 cg.Group("🌐 API 请求处理")
 cg.Info("接收到请求: GET /api/users")
 
-    // 嵌套分组
-    cg.Group("参数验证")
-    cg.Info("验证通过")
-    cg.GroupEnd()
+// 嵌套分组
+cg.Group("参数验证")
+cg.Info("验证通过")
+cg.GroupEnd()
 
 // 📋 表格展示 - 结构化数据可视化
 users := []map[string]interface{}{
-    {"ID": 1, "姓名": "张三", "年龄": 25, "状态": "Active"},
-    {"ID": 2, "姓名": "李四", "年龄": 30, "状态": "Active"},
+	{"ID": 1, "姓名": "张三", "年龄": 25, "状态": "Active"},
+	{"ID": 2, "姓名": "李四", "年龄": 30, "状态": "Active"},
 }
 cg.Table(users)
 // 输出美观的表格:
@@ -375,6 +339,7 @@ timer.End()
 ```
 
 **主要特性**：
+
 - 🎯 **日志分组**: 
   - `Group(label, ...args)` - 开始新分组
   - `GroupCollapsed(label, ...args)` - 开始折叠分组（仅显示 ERROR/FATAL）
@@ -399,12 +364,6 @@ timer.End()
   - `ErrorContext(ctx, ...)` - 带上下文的 Error 日志
   - 在分组内使用，自动继承缩进
 
-- 🌐 **全局方法**: 
-  - `logger.Group()` / `logger.GroupEnd()`
-  - `logger.Table(data)`
-  - `logger.Time(label)`
-  - 无需创建 ConsoleGroup，直接使用
-
 **适用场景**：
 - 🚀 应用启动流程展示
 - 📊 批量数据处理进度
@@ -412,13 +371,153 @@ timer.End()
 - ⚡ 性能瓶颈分析
 - 🐛 调试信息结构化输出
 
-**兼容性**：
-- ✅ 所有日志器均支持: `Logger`, `UltraFastLogger`, `StandardAdapter`
-- ✅ `UltraFastLogger` 通过内部委托实现完整 Console 功能
-- ✅ `EmptyLogger` 提供空实现，不影响生产环境性能
+### 特殊日志类型
 
-📖 **[查看完整 Console 使用文档和高级示例 →](docs/CONSOLE_USAGE.md)**
+```go
+log := logger.NewLogger()
 
+// 成功日志
+log.Success("用户注册成功")
+
+// 加载日志
+log.Loading("正在加载配置文件...")
+
+// 配置日志
+log.ConfigLog("数据库连接: %s", "localhost:3306")
+
+// 启动/停止日志
+log.Start("HTTP 服务器启动在端口 8080")
+log.Stop("HTTP 服务器已停止")
+
+// 数据库日志
+log.Database("执行查询: SELECT * FROM users")
+
+// 网络日志
+log.Network("发送 HTTP 请求: GET /api/users")
+
+// 安全日志
+log.Security("检测到可疑登录尝试")
+
+// 缓存日志
+log.Cache("缓存命中: user:1001")
+
+// 环境日志
+log.Environment("当前环境: production")
+
+// 性能日志（自动分级）
+log.Performance("数据库查询", 50*time.Millisecond)
+// 输出: ⚡ [PERF-EXCELLENT] 数据库查询 completed in 50ms
+
+log.Performance("API 调用", 2*time.Second, map[string]any{
+	"endpoint": "/api/users",
+	"method":   "GET",
+})
+// 输出: 🐢 [PERF-SLOW] API 调用 completed in 2s | Details: map[endpoint:/api/users method:GET]
+
+// 进度日志
+log.Progress(50, 100, "数据导入")
+// 输出: 🟡 [PROGRESS] 数据导入: 50/100 (50.0%)
+
+// 里程碑日志
+log.Milestone("系统初始化完成")
+// 输出: 🎯 [MILESTONE] 系统初始化完成
+
+// 健康检查日志
+log.Health("数据库", true, "连接正常")
+// 输出: ✅ [HEALTH] 数据库: HEALTHY | 连接正常
+
+log.Health("Redis", false, "连接超时")
+// 输出: ❌ [HEALTH] Redis: UNHEALTHY | 连接超时
+
+// 审计日志
+log.Audit("删除用户", "admin", "user:1001", "成功")
+// 输出: 📋 [AUDIT] User: admin | Action: 删除用户 | Resource: user:1001 | Result: 成功
+```
+
+### 计时器辅助
+
+```go
+log := logger.NewLogger()
+
+// 开始计时
+timing := log.StartTiming("数据处理")
+
+// 添加详细信息
+timing.AddDetail("records", 1000)
+timing.AddDetail("source", "database")
+
+// 结束计时并自动记录
+timing.End()
+// 输出: ⚡ [PERF-FAST] 数据处理 completed in 80ms | Details: map[records:1000 source:database]
+```
+
+### 返回错误的日志方法
+
+```go
+func processUser(id int) error {
+	user, err := findUser(id)
+	if err != nil {
+		// 记录错误日志并返回错误
+		return log.ErrorReturn("查找用户失败: %v", err)
+	}
+	
+	if user == nil {
+		// 记录警告日志并返回错误
+		return log.WarnReturn("用户不存在: %d", id)
+	}
+	
+	return nil
+}
+
+// 带上下文的返回错误
+func processOrder(ctx context.Context, orderID string) error {
+	order, err := findOrder(orderID)
+	if err != nil {
+		return log.ErrorCtxReturn(ctx, "查找订单失败: %v", err)
+	}
+	
+	return nil
+}
+
+// 键值对方式返回错误
+func validateInput(data map[string]interface{}) error {
+	if data["email"] == nil {
+		return log.WarnKVReturn("缺少必填字段", "field", "email")
+	}
+	
+	return nil
+}
+```
+
+### 多输出适配器
+
+```go
+// 创建多个写入器
+consoleWriter := logger.NewConsoleWriter(os.Stdout)
+fileWriter := logger.NewFileWriter("app.log")
+rotateWriter := logger.NewRotateWriter("app.log", 100*1024*1024, 10) // 100MB, 保留10个文件
+
+// 组合多个写入器
+multiWriter := logger.NewMultiWriter(consoleWriter, fileWriter, rotateWriter)
+
+// 创建日志实例
+log := logger.NewLogger().WithOutput(multiWriter)
+
+log.Info("这条日志会同时输出到控制台和文件")
+```
+
+### 空日志实现（禁用日志）
+
+```go
+// 创建空日志实例（不输出任何日志）
+emptyLog := logger.NewEmptyLogger()
+
+// 所有日志方法都不会产生任何输出
+emptyLog.Info("这条日志不会输出")
+emptyLog.Error("这条错误也不会输出")
+
+// 适用场景：测试环境、性能敏感场景
+```
 
 ## 🤝 社区贡献
 
@@ -427,30 +526,30 @@ timer.End()
 ### 提交代码
 
 1. **Fork 项目**
-   ```bash
-   git clone https://github.com/kamalyes/go-logger.git
-   cd go-logger
-   ```
+```bash
+git clone https://github.com/kamalyes/go-logger.git
+cd go-logger
+```
 
 2. **创建特性分支**
-   ```bash
-   git checkout -b feature/your-amazing-feature
-   ```
+```bash
+git checkout -b feature/your-amazing-feature
+```
 
 3. **编写代码和测试**
-   - 确保新功能有完整的测试套件
-   - 运行 `go test ./...` 确保所有测试通过
-   - 保持代码覆盖率 > 90%
+- 确保新功能有完整的测试套件
+- 运行 `go test ./...` 确保所有测试通过
+- 保持代码覆盖率 > 90%
 
 4. **提交更改**
-   ```bash
-   git commit -m 'feat: add amazing new feature'
-   ```
+```bash
+git commit -m 'feat: add amazing new feature'
+```
 
 5. **推送并创建 Pull Request**
-   ```bash
-   git push origin feature/your-amazing-feature
-   ```
+```bash
+git push origin feature/your-amazing-feature
+```
 
 ### 代码规范
 
@@ -466,18 +565,6 @@ timer.End()
 - 测试覆盖率不得低于当前水平
 - 包含性能基准测试（如适用）
 - 验证并发安全性
-
-## 📊 性能基准
-
-最新性能测试结果：
-
-```
-BenchmarkUltraFastLogger-8       157894737     7.56 ns/op     0 B/op     0 allocs/op
-BenchmarkStandardLogger-8         52631578    22.85 ns/op     8 B/op     1 allocs/op
-BenchmarkMemoryMonitor-8           9803921   122.4 ns/op    48 B/op     2 allocs/op
-```
-
-详细性能分析请参考 [性能文档](docs/PERFORMANCE.md)。
 
 ## ⭐ Star 历史
 

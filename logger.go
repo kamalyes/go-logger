@@ -2,9 +2,9 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 09:42:37
+ * @LastEditTime: 2026-02-27 09:55:17
  * @FilePath: \go-logger\logger.go
- * @Description: 统一的日志工具包，支持 emoji 和结构化日志
+ * @Description: 统一的高性能日志实现 - 整合所有功能
  *
  * Copyright (c) 2024 by kamalyes, All Rights Reserved.
  */
@@ -13,92 +13,890 @@ package logger
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/kamalyes/go-toolbox/pkg/convert"
+	"github.com/kamalyes/go-toolbox/pkg/mathx"
+	"google.golang.org/grpc/metadata"
 )
 
-// 性能优化: 缓冲池
-var stringBuilderPool = sync.Pool{
-	New: func() interface{} {
-		return &strings.Builder{}
+// ============================================================================
+// 性能优化：对象池和预计算常量
+// ============================================================================
+
+const (
+	maxLogMessageSize    = 1024 // 单条日志消息的最大预分配大小
+	estimatedContextSize = 100  // 预估的上下文信息大小（TraceID/RequestID 等）
+
+	// Metadata keys - 用于从 gRPC metadata 获取
+	MetadataKeyTraceID   = "x-trace-id"
+	MetadataKeyRequestID = "x-request-id"
+)
+
+// 字节池 - 用于日志消息构建
+var bytePool = sync.Pool{
+	New: func() any {
+		return make([]byte, 0, maxLogMessageSize)
 	},
 }
 
-// 性能优化: 预计算的级别格式
+// 上下文信息池 - 用于构建上下文字符串
+var contextPool = sync.Pool{
+	New: func() any {
+		return make([]byte, 0, estimatedContextSize)
+	},
+}
+
+// fieldMap 池 - 用于 fieldLogger 的 map 复用
+var fieldMapPool = sync.Pool{
+	New: func() any {
+		return make(map[string]any, 8) // 预分配常见大小
+	},
+}
+
+// 预计算的常量字节切片
 var (
-	levelFormatsCache      = make(map[LogLevel]string)
-	colorLevelFormatsCache = make(map[LogLevel]string)
-	initCacheOnce          sync.Once
+	debugPrefix = []byte("🐛 [DEBUG] ")
+	infoPrefix  = []byte("ℹ️ [INFO] ")
+	warnPrefix  = []byte("⚠️ [WARN] ")
+	errorPrefix = []byte("❌ [ERROR] ")
+	fatalPrefix = []byte("💀 [FATAL] ")
+
+	debugPrefixColor = []byte("\033[36m🐛 [DEBUG]\033[0m ")
+	infoPrefixColor  = []byte("\033[32mℹ️ [INFO]\033[0m ")
+	warnPrefixColor  = []byte("\033[33m⚠️ [WARN]\033[0m ")
+	errorPrefixColor = []byte("\033[31m❌ [ERROR]\033[0m ")
+	fatalPrefixColor = []byte("\033[35m💀 [FATAL]\033[0m ")
+
+	newline = []byte("\n")
+
+	// context 提取的常量前缀（优化字符串拼接）
+	traceIDPrefix   = []byte("TraceID=")
+	requestIDPrefix = []byte(" RequestID=")
+	bracketOpen     = []byte("[")
+	bracketClose    = []byte("] ")
+
+	// 键值对日志的常量字符串
+	kvSeparator  = []byte(": ")
+	kvDelimiter  = []byte(", ")
+	kvBraceOpen  = []byte(" {")
+	kvBraceClose = []byte("}")
+	kvMissing    = []byte("<missing>")
 )
 
-func initLevelFormatsCache() {
-	levels := []LogLevel{DEBUG, INFO, WARN, ERROR, FATAL}
-
-	for _, level := range levels {
-		// 普通格式
-		levelFormatsCache[level] = fmt.Sprintf("%s [%s]", level.Emoji(), level.String())
-
-		// 彩色格式
-		colorLevelFormatsCache[level] = level.Color() + levelFormatsCache[level] + "\033[0m"
+var (
+	levelPrefixes = map[LogLevel][]byte{
+		DEBUG: debugPrefix,
+		INFO:  infoPrefix,
+		WARN:  warnPrefix,
+		ERROR: errorPrefix,
+		FATAL: fatalPrefix,
 	}
+
+	levelPrefixesColor = map[LogLevel][]byte{
+		DEBUG: debugPrefixColor,
+		INFO:  infoPrefixColor,
+		WARN:  warnPrefixColor,
+		ERROR: errorPrefixColor,
+		FATAL: fatalPrefixColor,
+	}
+)
+
+// ============================================================================
+// 上下文提取器
+// ============================================================================
+
+// ContextExtractor 上下文信息提取器函数类型
+type ContextExtractor func(ctx context.Context) string
+
+// defaultContextExtractor 默认的上下文信息提取器
+// 从 context.Context 中提取 TraceID 和 RequestID
+func defaultContextExtractor(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+
+	var traceID, requestID string
+
+	// 1. 尝试从 context.Value 获取
+	if tid, ok := ctx.Value(KeyTraceID).(string); ok && tid != "" {
+		traceID = tid
+	}
+	if rid, ok := ctx.Value(KeyRequestID).(string); ok && rid != "" {
+		requestID = rid
+	}
+
+	// 2. 如果还没找到，尝试从 gRPC metadata 获取
+	if traceID == "" || requestID == "" {
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if traceID == "" {
+				if values := md.Get(MetadataKeyTraceID); len(values) > 0 {
+					traceID = values[0]
+				}
+			}
+			if requestID == "" {
+				if values := md.Get(MetadataKeyRequestID); len(values) > 0 {
+					requestID = values[0]
+				}
+			}
+		}
+	}
+
+	// 3. 构建前缀（使用专用的上下文池和预分配的常量）
+	if traceID != "" || requestID != "" {
+		buf := contextPool.Get().([]byte)
+		buf = buf[:0]
+		defer contextPool.Put(buf)
+
+		buf = append(buf, bracketOpen...)
+		if traceID != "" {
+			buf = append(buf, traceIDPrefix...)
+			buf = append(buf, convert.S2B(traceID)...)
+		}
+		if requestID != "" {
+			buf = append(buf, requestIDPrefix...)
+			buf = append(buf, convert.S2B(requestID)...)
+		}
+		buf = append(buf, bracketClose...)
+		return string(buf)
+	}
+
+	return ""
 }
+
+// ============================================================================
+// Logger 结构体和初始化
+// ============================================================================
 
 // defaultLogger 默认日志记录器
 var defaultLogger *Logger
 
 func init() {
-	defaultLogger = NewLogger(DefaultConfig())
+	defaultLogger = NewLogger()
 }
 
 // New 创建新的日志记录器（简化版本）
-// 使用默认配置创建日志记录器，支持链式调用配置
 func New() *Logger {
-	return NewLogger(DefaultConfig())
+	return NewLogger()
 }
 
-// NewUltraFast 创建极致性能日志器（便利函数）
-// 使用优化配置创建UltraFastLogger
-func NewUltraFast() *UltraFastLogger {
-	return NewUltraFastLogger(DefaultConfig())
+// ultraLog 极致优化的日志方法（使用字节池和零拷贝）
+func (l *Logger) ultraLog(level LogLevel, msg string) {
+	if level < l.level {
+		return
+	}
+
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	// 添加时间戳
+	buf = convert.FastFormatTime(buf, time.Now())
+
+	// 添加前缀（如果有）
+	if l.prefix != "" {
+		buf = append(buf, convert.S2B(l.prefix)...)
+	}
+
+	// 添加级别前缀
+	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
+	buf = append(buf, prefix...)
+
+	// 添加调用者信息（如果需要）
+	if l.showCaller {
+		if pc, file, line, ok := runtime.Caller(3); ok {
+			funcName := runtime.FuncForPC(pc).Name()
+			if idx := strings.LastIndex(funcName, "."); idx != -1 {
+				funcName = funcName[idx+1:]
+			}
+			if idx := strings.LastIndex(file, "/"); idx != -1 {
+				file = file[idx+1:]
+			}
+			buf = append(buf, '[')
+			buf = append(buf, convert.S2B(file)...)
+			buf = append(buf, ':')
+			buf = convert.FastAppendInt(buf, line)
+			buf = append(buf, ':')
+			buf = append(buf, convert.S2B(funcName)...)
+			buf = append(buf, ']', ' ')
+		}
+	}
+
+	// 添加消息
+	buf = append(buf, convert.S2B(msg)...)
+	buf = append(buf, newline...)
+
+	// 写入输出
+	l.mu.Lock()
+	l.output.Write(buf)
+	l.mu.Unlock()
+
+	if level == FATAL {
+		os.Exit(1)
+	}
 }
 
-// NewOptimized 创建优化日志器（便利函数）
-// 使用平衡性能与功能的配置创建Logger
-func NewOptimized() *Logger {
-	config := DefaultConfig()
-	config.Level = INFO
-	config.Colorful = true
-	config.ShowCaller = false
-	return NewLogger(config)
+// ultraLogf 极致优化的格式化日志方法
+func (l *Logger) ultraLogf(level LogLevel, format string, args ...any) {
+	if level < l.level {
+		return
+	}
+
+	// 快速路径：无参数格式化
+	if len(args) == 0 {
+		l.ultraLog(level, format)
+		return
+	}
+
+	// 有参数时才进行格式化
+	msg := fmt.Sprintf(format, args...)
+	l.ultraLog(level, msg)
 }
 
-// NewLogger 创建新的日志记录器
-func NewLogger(config *LogConfig) *Logger {
-	if config == nil {
-		config = DefaultConfig()
-	}
+// log 记录日志 - 使用 ultraLogf 提升性能
+func (l *Logger) log(level LogLevel, format string, args ...any) {
+	l.ultraLogf(level, format, args...)
+}
 
-	// 验证配置
-	if err := config.Validate(); err != nil {
-		config = DefaultConfig()
+// Debug 调试日志
+func (l *Logger) Debug(format string, args ...any) {
+	if l.level > DEBUG {
+		return
 	}
+	l.ultraLogf(DEBUG, format, args...)
+}
 
-	prefix := config.Prefix
-	if prefix != "" && !strings.HasSuffix(prefix, " ") {
-		prefix += " "
+// Info 信息日志
+func (l *Logger) Info(format string, args ...any) {
+	if l.level > INFO {
+		return
 	}
+	l.ultraLogf(INFO, format, args...)
+}
 
-	return &Logger{
-		level:      config.Level,
-		showCaller: config.ShowCaller,
-		logger:     log.New(config.Output, prefix, log.LstdFlags),
-		config:     config.Clone(),
+// Warn 警告日志
+func (l *Logger) Warn(format string, args ...any) {
+	if l.level > WARN {
+		return
+	}
+	l.ultraLogf(WARN, format, args...)
+}
+
+// Error 错误日志
+func (l *Logger) Error(format string, args ...any) {
+	if l.level > ERROR {
+		return
+	}
+	l.ultraLogf(ERROR, format, args...)
+}
+
+// Fatal 致命错误日志
+func (l *Logger) Fatal(format string, args ...any) {
+	l.ultraLogf(FATAL, format, args...)
+}
+
+// Printf风格方法（与上面相同，但命名更明确）
+func (l *Logger) Debugf(format string, args ...any) {
+	if l.level > DEBUG {
+		return
+	}
+	l.ultraLogf(DEBUG, format, args...)
+}
+
+func (l *Logger) Infof(format string, args ...any) {
+	if l.level > INFO {
+		return
+	}
+	l.ultraLogf(INFO, format, args...)
+}
+
+func (l *Logger) Warnf(format string, args ...any) {
+	if l.level > WARN {
+		return
+	}
+	l.ultraLogf(WARN, format, args...)
+}
+
+func (l *Logger) Errorf(format string, args ...any) {
+	if l.level > ERROR {
+		return
+	}
+	l.ultraLogf(ERROR, format, args...)
+}
+
+func (l *Logger) Fatalf(format string, args ...any) {
+	l.ultraLogf(FATAL, format, args...)
+}
+
+// WithField 添加字段信息（结构化日志）
+func (l *Logger) WithField(key string, value any) ILogger {
+	return &fieldLogger{
+		logger: l,
+		fields: map[string]any{key: value},
 	}
 }
+
+// WithFields 添加多个字段信息（结构化日志）
+func (l *Logger) WithFields(fields map[string]any) ILogger {
+	if len(fields) == 0 {
+		return l
+	}
+
+	return &fieldLogger{
+		logger: l,
+		fields: fields,
+	}
+}
+
+// WithError 添加错误信息
+func (l *Logger) WithError(err error) ILogger {
+	return l.WithField("error", err.Error())
+}
+
+// ============================================================================
+// Logger 实例方法
+// ============================================================================
+
+// 纯文本日志方法
+func (l *Logger) DebugMsg(msg string) {
+	if l.level > DEBUG {
+		return
+	}
+	l.ultraLog(DEBUG, msg)
+}
+
+func (l *Logger) InfoMsg(msg string) {
+	if l.level > INFO {
+		return
+	}
+	l.ultraLog(INFO, msg)
+}
+
+func (l *Logger) WarnMsg(msg string) {
+	if l.level > WARN {
+		return
+	}
+	l.ultraLog(WARN, msg)
+}
+
+func (l *Logger) ErrorMsg(msg string) {
+	if l.level > ERROR {
+		return
+	}
+	l.ultraLog(ERROR, msg)
+}
+
+func (l *Logger) FatalMsg(msg string) {
+	l.ultraLog(FATAL, msg)
+}
+
+// 多行日志方法 - 自动处理换行符
+func (l *Logger) InfoLines(lines ...string) {
+	if l.level > INFO {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(INFO, line)
+	}
+}
+
+func (l *Logger) ErrorLines(lines ...string) {
+	if l.level > ERROR {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(ERROR, line)
+	}
+}
+
+func (l *Logger) WarnLines(lines ...string) {
+	if l.level > WARN {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(WARN, line)
+	}
+}
+
+func (l *Logger) DebugLines(lines ...string) {
+	if l.level > DEBUG {
+		return
+	}
+	for _, line := range lines {
+		l.ultraLog(DEBUG, line)
+	}
+}
+
+// SetContextExtractor 设置自定义上下文提取器
+func (l *Logger) SetContextExtractor(extractor ContextExtractor) {
+	if extractor == nil {
+		l.contextExtractor = defaultContextExtractor
+	} else {
+		l.contextExtractor = extractor
+	}
+}
+
+// GetContextExtractor 获取当前的上下文提取器
+func (l *Logger) GetContextExtractor() ContextExtractor {
+	if l.contextExtractor == nil {
+		return defaultContextExtractor
+	}
+	return l.contextExtractor
+}
+
+// extractContextInfo 从上下文中提取信息
+func (l *Logger) extractContextInfo(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if l.contextExtractor == nil {
+		return defaultContextExtractor(ctx)
+	}
+	return l.contextExtractor(ctx)
+}
+
+// 带上下文的日志方法
+func (l *Logger) DebugContext(ctx context.Context, format string, args ...any) {
+	if l.level > DEBUG {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(DEBUG, format, args...)
+}
+
+func (l *Logger) InfoContext(ctx context.Context, format string, args ...any) {
+	if l.level > INFO {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(INFO, format, args...)
+}
+
+func (l *Logger) WarnContext(ctx context.Context, format string, args ...any) {
+	if l.level > WARN {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(WARN, format, args...)
+}
+
+func (l *Logger) ErrorContext(ctx context.Context, format string, args ...any) {
+	if l.level > ERROR {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(ERROR, format, args...)
+}
+
+func (l *Logger) FatalContext(ctx context.Context, format string, args ...any) {
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		format = contextInfo + format
+	}
+	l.ultraLogf(FATAL, format, args...)
+}
+
+// ============================================================================
+// 键值对和结构化日志辅助方法
+// ============================================================================
+
+// logWithKV 极简键值对实现 - 零分配优化
+func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
+	if level < l.level {
+		return
+	}
+
+	if len(keysAndValues) == 0 {
+		l.ultraLog(level, msg)
+		return
+	}
+
+	// 检查是否是单个对象参数
+	if len(keysAndValues) == 1 {
+		if objFields := convert.ParseObjectToMap(keysAndValues[0]); objFields != nil {
+			l.logWithFields(level, msg, objFields)
+			return
+		}
+	}
+
+	// 快速构建带键值对的消息
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	buf = append(buf, convert.S2B(msg)...)
+	buf = append(buf, kvBraceOpen...)
+
+	for i := 0; i < len(keysAndValues); i += 2 {
+		if i > 0 {
+			buf = append(buf, kvDelimiter...)
+		}
+
+		// 键
+		buf = convert.AppendValue(buf, keysAndValues[i])
+		buf = append(buf, kvSeparator...)
+
+		// 值
+		if i+1 < len(keysAndValues) {
+			buf = convert.AppendValue(buf, keysAndValues[i+1])
+		} else {
+			buf = append(buf, kvMissing...)
+		}
+	}
+
+	buf = append(buf, kvBraceClose...)
+	l.ultraLog(level, string(buf))
+}
+
+// logWithFields 使用字段映射记录日志
+func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any) {
+	if level < l.level {
+		return
+	}
+
+	if len(fields) == 0 {
+		l.ultraLog(level, msg)
+		return
+	}
+
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	buf = append(buf, convert.S2B(msg)...)
+	buf = append(buf, kvBraceOpen...)
+
+	first := true
+	for k, v := range fields {
+		if !first {
+			buf = append(buf, kvDelimiter...)
+		}
+		buf = append(buf, convert.S2B(k)...)
+		buf = append(buf, kvSeparator...)
+		buf = convert.AppendValue(buf, v)
+		first = false
+	}
+
+	buf = append(buf, kvBraceClose...)
+	l.ultraLog(level, string(buf))
+}
+
+// logWithContextKV 带上下文的键值对日志
+func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg string, keysAndValues ...any) {
+	if level < l.level {
+		return
+	}
+
+	// 先从context提取信息
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		msg = contextInfo + msg
+	}
+
+	l.logWithKV(level, msg, keysAndValues...)
+}
+
+// ============================================================================
+// 结构化日志方法（键值对）
+// ============================================================================
+
+// 结构化日志方法（键值对）
+func (l *Logger) DebugKV(msg string, keysAndValues ...any) {
+	if l.level > DEBUG {
+		return
+	}
+	l.logWithKV(DEBUG, msg, keysAndValues...)
+}
+
+func (l *Logger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if l.level > DEBUG {
+		return
+	}
+	l.logWithContextKV(ctx, DEBUG, msg, keysAndValues...)
+}
+
+func (l *Logger) InfoKV(msg string, keysAndValues ...any) {
+	if l.level > INFO {
+		return
+	}
+	l.logWithKV(INFO, msg, keysAndValues...)
+}
+
+func (l *Logger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if l.level > INFO {
+		return
+	}
+	l.logWithContextKV(ctx, INFO, msg, keysAndValues...)
+}
+
+func (l *Logger) WarnKV(msg string, keysAndValues ...any) {
+	if l.level > WARN {
+		return
+	}
+	l.logWithKV(WARN, msg, keysAndValues...)
+}
+
+func (l *Logger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if l.level > WARN {
+		return
+	}
+	l.logWithContextKV(ctx, WARN, msg, keysAndValues...)
+}
+
+func (l *Logger) ErrorKV(msg string, keysAndValues ...any) {
+	if l.level > ERROR {
+		return
+	}
+	l.logWithKV(ERROR, msg, keysAndValues...)
+}
+
+func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if l.level > ERROR {
+		return
+	}
+	l.logWithContextKV(ctx, ERROR, msg, keysAndValues...)
+}
+
+func (l *Logger) FatalKV(msg string, keysAndValues ...any) {
+	l.logWithKV(FATAL, msg, keysAndValues...)
+}
+
+func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	l.logWithContextKV(ctx, FATAL, msg, keysAndValues...)
+}
+
+// 字段映射方法（直接支持 map[string]any）
+func (l *Logger) DebugWithFields(msg string, fields map[string]any) {
+	if l.level > DEBUG {
+		return
+	}
+	l.logWithFields(DEBUG, msg, fields)
+}
+
+func (l *Logger) InfoWithFields(msg string, fields map[string]any) {
+	if l.level > INFO {
+		return
+	}
+	l.logWithFields(INFO, msg, fields)
+}
+
+func (l *Logger) WarnWithFields(msg string, fields map[string]any) {
+	if l.level > WARN {
+		return
+	}
+	l.logWithFields(WARN, msg, fields)
+}
+
+func (l *Logger) ErrorWithFields(msg string, fields map[string]any) {
+	if l.level > ERROR {
+		return
+	}
+	l.logWithFields(ERROR, msg, fields)
+}
+
+func (l *Logger) FatalWithFields(msg string, fields map[string]any) {
+	l.logWithFields(FATAL, msg, fields)
+}
+
+// 原始日志条目方法
+func (l *Logger) Log(level LogLevel, msg string) {
+	if level < l.level {
+		return
+	}
+	l.ultraLog(level, msg)
+}
+
+func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
+	if level < l.level {
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		msg = contextInfo + msg
+	}
+	l.ultraLog(level, msg)
+}
+
+func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
+	if level < l.level {
+		return
+	}
+	l.logWithKV(level, msg, keysAndValues...)
+}
+
+func (l *Logger) LogWithFields(level LogLevel, msg string, fields map[string]any) {
+	if level < l.level {
+		return
+	}
+	l.logWithFields(level, msg, fields)
+}
+
+// WithContext 带上下文的logger（当前实现返回自身）
+func (l *Logger) WithContext(ctx context.Context) ILogger {
+	// 创建一个新的logger实例并设置context
+	newLogger := l.Clone()
+	if loggerPtr, ok := newLogger.(*Logger); ok {
+		loggerPtr.context = ctx
+		return loggerPtr
+	}
+	return newLogger
+}
+
+// 兼容标准log包的方法
+func (l *Logger) Print(args ...any) {
+	l.Info("%s", fmt.Sprint(args...))
+}
+
+func (l *Logger) Printf(format string, args ...any) {
+	l.Info(format, args...)
+}
+
+func (l *Logger) Println(args ...any) {
+	l.Info("%s", fmt.Sprintln(args...))
+}
+
+// ============================================================================
+// 返回错误的日志方法
+// ============================================================================
+
+// DebugReturn 记录调试日志并返回格式化的错误
+func (l *Logger) DebugReturn(format string, args ...any) error {
+	l.log(DEBUG, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// InfoReturn 记录信息日志并返回格式化的错误
+func (l *Logger) InfoReturn(format string, args ...any) error {
+	l.log(INFO, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// WarnReturn 记录警告日志并返回格式化的错误
+func (l *Logger) WarnReturn(format string, args ...any) error {
+	l.log(WARN, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// ErrorReturn 记录错误日志并返回格式化的错误
+func (l *Logger) ErrorReturn(format string, args ...any) error {
+	l.log(ERROR, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// DebugCtxReturn 记录带上下文的调试日志并返回格式化的错误
+func (l *Logger) DebugCtxReturn(ctx context.Context, format string, args ...any) error {
+	l.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// InfoCtxReturn 记录带上下文的信息日志并返回格式化的错误
+func (l *Logger) InfoCtxReturn(ctx context.Context, format string, args ...any) error {
+	l.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// WarnCtxReturn 记录带上下文的警告日志并返回格式化的错误
+func (l *Logger) WarnCtxReturn(ctx context.Context, format string, args ...any) error {
+	l.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// ErrorCtxReturn 记录带上下文的错误日志并返回格式化的错误
+func (l *Logger) ErrorCtxReturn(ctx context.Context, format string, args ...any) error {
+	l.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// DebugKVReturn 记录带键值对的调试日志并返回错误
+func (l *Logger) DebugKVReturn(msg string, keysAndValues ...any) error {
+	l.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// InfoKVReturn 记录带键值对的信息日志并返回错误
+func (l *Logger) InfoKVReturn(msg string, keysAndValues ...any) error {
+	l.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// WarnKVReturn 记录带键值对的警告日志并返回错误
+func (l *Logger) WarnKVReturn(msg string, keysAndValues ...any) error {
+	l.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// ErrorKVReturn 记录带键值对的错误日志并返回错误
+func (l *Logger) ErrorKVReturn(msg string, keysAndValues ...any) error {
+	l.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// ============================================================================
+// Console 风格日志方法实现
+// ============================================================================
+
+// getOrCreateConsoleGroup 获取或创建 ConsoleGroup（延迟初始化）
+func (l *Logger) getOrCreateConsoleGroup() *ConsoleGroup {
+	l.consoleGroupOnce.Do(func() {
+		l.consoleGroup = &ConsoleGroup{
+			logger:          l,
+			indentLevel:     0,
+			collapsed:       false,
+			collapsedLevels: make([]bool, 0, 16), // 预分配 16 层嵌套容量
+		}
+	})
+	return l.consoleGroup
+}
+
+// ConsoleGroup 开始一个新的日志分组
+func (l *Logger) ConsoleGroup(label string, args ...any) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.Group(label, args...)
+}
+
+// ConsoleGroupCollapsed 开始一个折叠的日志分组
+func (l *Logger) ConsoleGroupCollapsed(label string, args ...any) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.GroupCollapsed(label, args...)
+}
+
+// ConsoleGroupEnd 结束当前分组
+func (l *Logger) ConsoleGroupEnd() {
+	cg := l.getOrCreateConsoleGroup()
+	cg.GroupEnd()
+}
+
+// ConsoleTable 显示表格
+func (l *Logger) ConsoleTable(data any) {
+	cg := l.getOrCreateConsoleGroup()
+	cg.Table(data)
+}
+
+// ConsoleTime 开始计时
+func (l *Logger) ConsoleTime(label string) *Timer {
+	cg := l.getOrCreateConsoleGroup()
+	return cg.Time(label)
+}
+
+// ============================================================================
+// 配置方法实现
+// ============================================================================
 
 // SetLevel 设置日志级别
 func (l *Logger) SetLevel(level LogLevel) {
@@ -115,847 +913,828 @@ func (l *Logger) SetShowCaller(show bool) {
 	l.showCaller = show
 }
 
-// IsShowCaller 检查是否显示调用者信息
-func (l *Logger) IsShowCaller() bool {
-	return l.showCaller
+// ============================================================================
+// fieldLogger - 字段日志包装器（用于 WithField/WithFields）
+// ============================================================================
+
+// fieldLogger 轻量级字段日志器包装
+type fieldLogger struct {
+	logger *Logger
+	fields map[string]any
 }
 
-// IsLevelEnabled 检查给定级别是否启用
-func (l *Logger) IsLevelEnabled(level LogLevel) bool {
-	return level >= l.level
-}
-
-// GetConfig 获取日志配置的副本
-func (l *Logger) GetConfig() *LogConfig {
-	return l.config.Clone()
-}
-
-// UpdateConfig 更新日志配置
-func (l *Logger) UpdateConfig(config *LogConfig) {
-	if config == nil {
-		return
-	}
-
-	l.config = config.Clone()
-	l.level = config.Level
-	l.showCaller = config.ShowCaller
-
-	// 更新内部logger
-	prefix := config.Prefix
-	if prefix != "" && !strings.HasSuffix(prefix, " ") {
-		prefix += " "
-	}
-	l.logger = log.New(config.Output, prefix, log.LstdFlags)
-}
-
-// WithLevel 设置日志级别并返回自身（链式调用）
-func (l *Logger) WithLevel(level LogLevel) *Logger {
-	l.SetLevel(level)
-	l.config.Level = level
-	return l
-}
-
-// WithShowCaller 设置是否显示调用者信息并返回自身（链式调用）
-func (l *Logger) WithShowCaller(show bool) *Logger {
-	l.SetShowCaller(show)
-	l.config.ShowCaller = show
-	return l
-}
-
-// WithPrefix 设置日志前缀并返回自身（链式调用）
-func (l *Logger) WithPrefix(prefix string) *Logger {
-	l.config.WithPrefix(prefix)
-	l.UpdateConfig(l.config)
-	return l
-}
-
-// WithColorful 设置是否使用彩色输出并返回自身（链式调用）
-func (l *Logger) WithColorful(colorful bool) *Logger {
-	l.config.WithColorful(colorful)
-	return l
-}
-
-// formatMessage 格式化消息 - 优化版本
-func (l *Logger) formatMessage(level LogLevel, format string, args ...interface{}) string {
-	// 初始化缓存
-	initCacheOnce.Do(initLevelFormatsCache)
-
-	// 提前检查级别，避免不必要的计算
-	if level < l.level {
-		return ""
-	}
-
-	// 使用 strings.Builder 减少内存分配
-	sb := stringBuilderPool.Get().(*strings.Builder)
-	defer func() {
-		sb.Reset()
-		stringBuilderPool.Put(sb)
-	}()
-
-	// 预估容量
-	estimatedSize := len(format) + 100
-	if l.showCaller {
-		estimatedSize += 50
-	}
-	sb.Grow(estimatedSize)
-
-	// 使用预计算的级别格式
-	if l.config.Colorful {
-		sb.WriteString(colorLevelFormatsCache[level])
-	} else {
-		sb.WriteString(levelFormatsCache[level])
-	}
-
-	// 添加调用者信息（如果需要）
-	if l.showCaller {
-		if pc, file, line, ok := runtime.Caller(3); ok {
-			funcName := runtime.FuncForPC(pc).Name()
-			if idx := strings.LastIndex(funcName, "."); idx != -1 {
-				funcName = funcName[idx+1:]
-			}
-			if idx := strings.LastIndex(file, "/"); idx != -1 {
-				file = file[idx+1:]
-			}
-			sb.WriteString(fmt.Sprintf(" [%s:%d:%s]", file, line, funcName))
-		}
-	}
-
-	// 添加消息
-	sb.WriteByte(' ')
-	if len(args) == 0 {
-		sb.WriteString(format)
-	} else {
-		// 只在需要时格式化
-		sb.WriteString(fmt.Sprintf(format, args...))
-	}
-
-	return sb.String()
-}
-
-// log 记录日志 - 优化版本
-func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
-	// 提前检查级别，避免不必要的计算
-	if level < l.level {
-		return
-	}
-
-	message := l.formatMessage(level, format, args...)
-	if message != "" { // 只有非空消息才输出
-		l.logger.Print(message)
-	}
-
-	if level == FATAL {
-		os.Exit(1)
-	}
-}
+// 实现所有 ILogger 接口方法，将字段附加到日志消息
 
 // Debug 调试日志
-func (l *Logger) Debug(format string, args ...interface{}) {
-	l.log(DEBUG, format, args...)
+func (f *fieldLogger) Debug(format string, args ...any) {
+	if !f.logger.IsLevelEnabled(DEBUG) {
+		return
+	}
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
+	}
+	f.logger.logWithFields(DEBUG, msg, f.fields)
 }
 
 // Info 信息日志
-func (l *Logger) Info(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
+func (f *fieldLogger) Info(format string, args ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
+	}
+	f.logger.logWithFields(INFO, msg, f.fields)
 }
 
 // Warn 警告日志
-func (l *Logger) Warn(format string, args ...interface{}) {
-	l.log(WARN, format, args...)
+func (f *fieldLogger) Warn(format string, args ...any) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
+	}
+	f.logger.logWithFields(WARN, msg, f.fields)
 }
 
 // Error 错误日志
-func (l *Logger) Error(format string, args ...interface{}) {
-	l.log(ERROR, format, args...)
+func (f *fieldLogger) Error(format string, args ...any) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
+	}
+	f.logger.logWithFields(ERROR, msg, f.fields)
 }
 
 // Fatal 致命错误日志
-func (l *Logger) Fatal(format string, args ...interface{}) {
-	l.log(FATAL, format, args...)
-}
-
-// Printf风格方法（与上面相同，但命名更明确）
-func (l *Logger) Debugf(format string, args ...interface{}) {
-	l.log(DEBUG, format, args...)
-}
-
-func (l *Logger) Infof(format string, args ...interface{}) {
-	l.log(INFO, format, args...)
-}
-
-func (l *Logger) Warnf(format string, args ...interface{}) {
-	l.log(WARN, format, args...)
-}
-
-func (l *Logger) Errorf(format string, args ...interface{}) {
-	l.log(ERROR, format, args...)
-}
-
-func (l *Logger) Fatalf(format string, args ...interface{}) {
-	l.log(FATAL, format, args...)
-}
-
-// WithField 添加字段信息（结构化日志）
-func (l *Logger) WithField(key string, value interface{}) ILogger {
-	prefix := fmt.Sprintf("%s%s=%v ", l.config.Prefix, key, value)
-	config := l.config.Clone()
-	config.Prefix = prefix
-
-	return NewLogger(config)
-}
-
-// WithFields 添加多个字段信息（结构化日志）
-func (l *Logger) WithFields(fields map[string]interface{}) ILogger {
-	if len(fields) == 0 {
-		return l
+func (f *fieldLogger) Fatal(format string, args ...any) {
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
 	}
-
-	var prefix strings.Builder
-	prefix.WriteString(l.config.Prefix)
-
-	for key, value := range fields {
-		prefix.WriteString(fmt.Sprintf("%s=%v ", key, value))
-	}
-
-	config := l.config.Clone()
-	config.Prefix = prefix.String()
-
-	return NewLogger(config)
+	f.logger.logWithFields(FATAL, msg, f.fields)
 }
 
-// WithError 添加错误信息
-func (l *Logger) WithError(err error) ILogger {
-	return l.WithField("error", err.Error())
+// Printf风格方法
+func (f *fieldLogger) Debugf(format string, args ...any) {
+	f.Debug(format, args...)
 }
 
-// Clone 克隆当前Logger
-func (l *Logger) Clone() ILogger {
-	// 创建新的配置反映当前logger状态
-	newConfig := l.config.Clone()
-	newConfig.Level = l.level
-	newConfig.ShowCaller = l.showCaller
-	return NewLogger(newConfig)
+func (f *fieldLogger) Infof(format string, args ...any) {
+	f.Info(format, args...)
 }
 
-// 全局方法
-func Debug(format string, args ...interface{}) {
-	defaultLogger.Debug(format, args...)
+func (f *fieldLogger) Warnf(format string, args ...any) {
+	f.Warn(format, args...)
 }
 
-func Info(format string, args ...interface{}) {
-	defaultLogger.Info(format, args...)
+func (f *fieldLogger) Errorf(format string, args ...any) {
+	f.Error(format, args...)
 }
 
-func Warn(format string, args ...interface{}) {
-	defaultLogger.Warn(format, args...)
+func (f *fieldLogger) Fatalf(format string, args ...any) {
+	f.Fatal(format, args...)
 }
-
-func Error(format string, args ...interface{}) {
-	defaultLogger.Error(format, args...)
-}
-
-func Fatal(format string, args ...interface{}) {
-	defaultLogger.Fatal(format, args...)
-}
-
-// SetGlobalLevel 设置全局日志级别
-func SetGlobalLevel(level LogLevel) {
-	defaultLogger.SetLevel(level)
-}
-
-// SetGlobalShowCaller 设置全局是否显示调用者信息
-func SetGlobalShowCaller(show bool) {
-	defaultLogger.SetShowCaller(show)
-}
-
-// GetGlobalLogger 获取全局Logger
-func GetGlobalLogger() *Logger {
-	return defaultLogger
-}
-
-// WithField 全局添加字段
-func WithField(key string, value interface{}) ILogger {
-	return defaultLogger.WithField(key, value)
-}
-
-// WithFields 全局添加多个字段
-func WithFields(fields map[string]interface{}) ILogger {
-	return defaultLogger.WithFields(fields)
-}
-
-// WithError 全局添加错误信息
-func WithError(err error) ILogger {
-	return defaultLogger.WithError(err)
-}
-
-// SetGlobalConfig 设置全局配置
-func SetGlobalConfig(config *LogConfig) {
-	defaultLogger.UpdateConfig(config)
-}
-
-// GetGlobalConfig 获取全局配置
-func GetGlobalConfig() *LogConfig {
-	return defaultLogger.GetConfig()
-}
-
-// 为 Logger 添加新接口方法的实现
 
 // 纯文本日志方法
-func (l *Logger) DebugMsg(msg string) {
-	l.Debug("%s", msg)
+func (f *fieldLogger) DebugMsg(msg string) {
+	if f.logger.level > DEBUG {
+		return
+	}
+	f.logger.logWithFields(DEBUG, msg, f.fields)
 }
 
-func (l *Logger) InfoMsg(msg string) {
-	l.Info("%s", msg)
+func (f *fieldLogger) InfoMsg(msg string) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	f.logger.logWithFields(INFO, msg, f.fields)
 }
 
-func (l *Logger) WarnMsg(msg string) {
-	l.Warn("%s", msg)
+func (f *fieldLogger) WarnMsg(msg string) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
+	f.logger.logWithFields(WARN, msg, f.fields)
 }
 
-func (l *Logger) ErrorMsg(msg string) {
-	l.Error("%s", msg)
+func (f *fieldLogger) ErrorMsg(msg string) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
+	f.logger.logWithFields(ERROR, msg, f.fields)
 }
 
-func (l *Logger) FatalMsg(msg string) {
-	l.Fatal("%s", msg)
+func (f *fieldLogger) FatalMsg(msg string) {
+	f.logger.logWithFields(FATAL, msg, f.fields)
 }
 
-// 多行日志方法 - 自动处理换行符
-func (l *Logger) InfoLines(lines ...string) {
+// 多行日志方法
+func (f *fieldLogger) InfoLines(lines ...string) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
 	for _, line := range lines {
-		l.Info("%s", line)
+		f.logger.logWithFields(INFO, line, f.fields)
 	}
 }
 
-func (l *Logger) ErrorLines(lines ...string) {
+func (f *fieldLogger) ErrorLines(lines ...string) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
 	for _, line := range lines {
-		l.Error("%s", line)
+		f.logger.logWithFields(ERROR, line, f.fields)
 	}
 }
 
-func (l *Logger) WarnLines(lines ...string) {
+func (f *fieldLogger) WarnLines(lines ...string) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
 	for _, line := range lines {
-		l.Warn("%s", line)
+		f.logger.logWithFields(WARN, line, f.fields)
 	}
 }
 
-func (l *Logger) DebugLines(lines ...string) {
+func (f *fieldLogger) DebugLines(lines ...string) {
+	if !f.logger.IsLevelEnabled(DEBUG) {
+		return
+	}
 	for _, line := range lines {
-		l.Debug("%s", line)
+		f.logger.logWithFields(DEBUG, line, f.fields)
 	}
 }
 
-// 带上下文的日志方法
-func (l *Logger) DebugContext(ctx context.Context, format string, args ...interface{}) {
-	// 目前忽略context，委托给基础方法
-	l.Debug(format, args...)
-}
-
-func (l *Logger) InfoContext(ctx context.Context, format string, args ...interface{}) {
-	l.Info(format, args...)
-}
-
-func (l *Logger) WarnContext(ctx context.Context, format string, args ...interface{}) {
-	l.Warn(format, args...)
-}
-
-func (l *Logger) ErrorContext(ctx context.Context, format string, args ...interface{}) {
-	l.Error(format, args...)
-}
-
-func (l *Logger) FatalContext(ctx context.Context, format string, args ...interface{}) {
-	l.Fatal(format, args...)
-}
-
-// 结构化日志方法（键值对）
-func (l *Logger) DebugKV(msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger) // 类型转换
-		logger.Debug("%s", msg)
-	} else {
-		l.Debug("%s", msg)
+// 上下文日志方法
+func (f *fieldLogger) DebugContext(ctx context.Context, format string, args ...any) {
+	if f.logger.level > DEBUG {
+		return
 	}
-}
-
-func (l *Logger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger)
-		logger.DebugContext(ctx, "%s", msg)
-	} else {
-		l.DebugContext(ctx, "%s", msg)
+	contextInfo := f.logger.extractContextInfo(ctx)
+	msg := fmt.Sprintf(format, args...)
+	if contextInfo != "" {
+		msg = contextInfo + msg
 	}
+	f.logger.logWithFields(DEBUG, msg, f.fields)
 }
 
-func (l *Logger) InfoKV(msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger) // 类型转换
-		logger.Info("%s", msg)
-	} else {
-		l.Info("%s", msg)
+func (f *fieldLogger) InfoContext(ctx context.Context, format string, args ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
 	}
-}
-
-func (l *Logger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger)
-		logger.InfoContext(ctx, "%s", msg)
-	} else {
-		l.InfoContext(ctx, "%s", msg)
+	contextInfo := f.logger.extractContextInfo(ctx)
+	msg := fmt.Sprintf(format, args...)
+	if contextInfo != "" {
+		msg = contextInfo + msg
 	}
+	f.logger.logWithFields(INFO, msg, f.fields)
 }
 
-func (l *Logger) WarnKV(msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger) // 类型转换
-		logger.Warn("%s", msg)
-	} else {
-		l.Warn("%s", msg)
+func (f *fieldLogger) WarnContext(ctx context.Context, format string, args ...any) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
 	}
-}
-
-func (l *Logger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger)
-		logger.WarnContext(ctx, "%s", msg)
-	} else {
-		l.WarnContext(ctx, "%s", msg)
+	contextInfo := f.logger.extractContextInfo(ctx)
+	msg := fmt.Sprintf(format, args...)
+	if contextInfo != "" {
+		msg = contextInfo + msg
 	}
+	f.logger.logWithFields(WARN, msg, f.fields)
 }
 
-func (l *Logger) ErrorKV(msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger) // 类型转换
-		logger.Error("%s", msg)
-	} else {
-		l.Error("%s", msg)
+func (f *fieldLogger) ErrorContext(ctx context.Context, format string, args ...any) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
 	}
-}
-
-func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger)
-		logger.ErrorContext(ctx, "%s", msg)
-	} else {
-		l.ErrorContext(ctx, "%s", msg)
+	contextInfo := f.logger.extractContextInfo(ctx)
+	msg := fmt.Sprintf(format, args...)
+	if contextInfo != "" {
+		msg = contextInfo + msg
 	}
+	f.logger.logWithFields(ERROR, msg, f.fields)
 }
 
-func (l *Logger) FatalKV(msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger) // 类型转换
-		logger.Fatal("%s", msg)
-	} else {
-		l.Fatal("%s", msg)
+func (f *fieldLogger) FatalContext(ctx context.Context, format string, args ...any) {
+	contextInfo := f.logger.extractContextInfo(ctx)
+	msg := fmt.Sprintf(format, args...)
+	if contextInfo != "" {
+		msg = contextInfo + msg
 	}
+	f.logger.logWithFields(FATAL, msg, f.fields)
 }
 
-func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	if len(fields) > 0 {
-		logger := l.WithFields(fields).(*Logger)
-		logger.FatalContext(ctx, "%s", msg)
-	} else {
-		l.FatalContext(ctx, "%s", msg)
+// 键值对日志方法
+func (f *fieldLogger) DebugKV(msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(DEBUG) {
+		return
 	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(DEBUG, msg, allFields...)
 }
 
-// 字段映射方法（直接支持 map[string]interface{}）
-func (l *Logger) DebugWithFields(msg string, fields map[string]interface{}) {
-	l.LogWithFields(DEBUG, msg, fields)
+func (f *fieldLogger) InfoKV(msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(INFO, msg, allFields...)
 }
 
-func (l *Logger) InfoWithFields(msg string, fields map[string]interface{}) {
-	l.LogWithFields(INFO, msg, fields)
+func (f *fieldLogger) WarnKV(msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(WARN, msg, allFields...)
 }
 
-func (l *Logger) WarnWithFields(msg string, fields map[string]interface{}) {
-	l.LogWithFields(WARN, msg, fields)
+func (f *fieldLogger) ErrorKV(msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(ERROR, msg, allFields...)
 }
 
-func (l *Logger) ErrorWithFields(msg string, fields map[string]interface{}) {
-	l.LogWithFields(ERROR, msg, fields)
+func (f *fieldLogger) FatalKV(msg string, keysAndValues ...any) {
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(FATAL, msg, allFields...)
 }
 
-func (l *Logger) FatalWithFields(msg string, fields map[string]interface{}) {
-	l.LogWithFields(FATAL, msg, fields)
+// 带上下文的键值对日志方法
+func (f *fieldLogger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(DEBUG) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithContextKV(ctx, DEBUG, msg, allFields...)
+}
+
+func (f *fieldLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithContextKV(ctx, INFO, msg, allFields...)
+}
+
+func (f *fieldLogger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithContextKV(ctx, WARN, msg, allFields...)
+}
+
+func (f *fieldLogger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithContextKV(ctx, ERROR, msg, allFields...)
+}
+
+func (f *fieldLogger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...any) {
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithContextKV(ctx, FATAL, msg, allFields...)
+}
+
+// 字段映射方法
+func (f *fieldLogger) DebugWithFields(msg string, fields map[string]any) {
+	if !f.logger.IsLevelEnabled(DEBUG) {
+		return
+	}
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(DEBUG, msg, mergedFields)
+}
+
+func (f *fieldLogger) InfoWithFields(msg string, fields map[string]any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(INFO, msg, mergedFields)
+}
+
+func (f *fieldLogger) WarnWithFields(msg string, fields map[string]any) {
+	if !f.logger.IsLevelEnabled(WARN) {
+		return
+	}
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(WARN, msg, mergedFields)
+}
+
+func (f *fieldLogger) ErrorWithFields(msg string, fields map[string]any) {
+	if !f.logger.IsLevelEnabled(ERROR) {
+		return
+	}
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(ERROR, msg, mergedFields)
+}
+
+func (f *fieldLogger) FatalWithFields(msg string, fields map[string]any) {
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(FATAL, msg, mergedFields)
 }
 
 // 原始日志条目方法
-func (l *Logger) Log(level LogLevel, msg string) {
-	switch level {
-	case DEBUG:
-		l.Debug("%s", msg)
-	case INFO:
-		l.Info("%s", msg)
-	case WARN:
-		l.Warn("%s", msg)
-	case ERROR:
-		l.Error("%s", msg)
-	case FATAL:
-		l.Fatal("%s", msg)
+func (f *fieldLogger) Log(level LogLevel, msg string) {
+	if !f.logger.IsLevelEnabled(level) {
+		return
 	}
+	f.logger.logWithFields(level, msg, f.fields)
 }
 
-func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
-	// 默认实现忽略context
-	l.Log(level, msg)
+func (f *fieldLogger) LogContext(ctx context.Context, level LogLevel, msg string) {
+	if !f.logger.IsLevelEnabled(level) {
+		return
+	}
+	contextInfo := f.logger.extractContextInfo(ctx)
+	if contextInfo != "" {
+		msg = contextInfo + msg
+	}
+	f.logger.logWithFields(level, msg, f.fields)
 }
 
-func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...interface{}) {
-	fields := l.parseKeysAndValues(keysAndValues...)
-	logger := l
-	if len(fields) > 0 {
-		logger = logger.WithFields(fields).(*Logger) // 这里需要类型转换，因为我们知道返回的是 *Logger
+func (f *fieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
+	if !f.logger.IsLevelEnabled(level) {
+		return
 	}
-
-	switch level {
-	case DEBUG:
-		logger.Debug("%s", msg)
-	case INFO:
-		logger.Info("%s", msg)
-	case WARN:
-		logger.Warn("%s", msg)
-	case ERROR:
-		logger.Error("%s", msg)
-	case FATAL:
-		logger.Fatal("%s", msg)
-	}
+	allFields := f.mergeKV(keysAndValues...)
+	f.logger.logWithKV(level, msg, allFields...)
 }
 
-func (l *Logger) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {
-	logger := l
-	if len(fields) > 0 {
-		logger = logger.WithFields(fields).(*Logger) // 类型转换
+func (f *fieldLogger) LogWithFields(level LogLevel, msg string, fields map[string]any) {
+	if !f.logger.IsLevelEnabled(level) {
+		return
 	}
-
-	switch level {
-	case DEBUG:
-		logger.Debug("%s", msg)
-	case INFO:
-		logger.Info("%s", msg)
-	case WARN:
-		logger.Warn("%s", msg)
-	case ERROR:
-		logger.Error("%s", msg)
-	case FATAL:
-		logger.Fatal("%s", msg)
-	}
+	mergedFields := f.mergeFieldsMap(fields)
+	f.logger.logWithFields(level, msg, mergedFields)
 }
 
-// WithContext 带上下文的logger（当前实现返回自身）
-func (l *Logger) WithContext(ctx context.Context) ILogger {
-	// 创建一个新的logger实例并设置context
-	newLogger := l.Clone()
-	if loggerPtr, ok := newLogger.(*Logger); ok {
-		loggerPtr.context = ctx
-		return loggerPtr
+// 配置方法
+func (f *fieldLogger) SetLevel(level LogLevel) {
+	f.logger.SetLevel(level)
+}
+
+func (f *fieldLogger) GetLevel() LogLevel {
+	return f.logger.GetLevel()
+}
+
+func (f *fieldLogger) SetShowCaller(show bool) {
+	f.logger.SetShowCaller(show)
+}
+
+func (f *fieldLogger) IsShowCaller() bool {
+	return f.logger.IsShowCaller()
+}
+
+func (f *fieldLogger) IsLevelEnabled(level LogLevel) bool {
+	return f.logger.IsLevelEnabled(level)
+}
+
+// 结构化日志构建器 - 使用 clear() 优化（Go 1.21+）
+func (f *fieldLogger) WithField(key string, value any) ILogger {
+	// 从对象池获取 map
+	newFields := fieldMapPool.Get().(map[string]any)
+
+	clear(newFields)
+
+	// 复制现有字段
+	for k, v := range f.fields {
+		newFields[k] = v
 	}
-	return newLogger
+	newFields[key] = value
+
+	return &fieldLogger{logger: f.logger, fields: newFields}
+}
+
+func (f *fieldLogger) WithFields(fields map[string]any) ILogger {
+	if len(fields) == 0 {
+		return f
+	}
+
+	// 从对象池获取 map
+	newFields := fieldMapPool.Get().(map[string]any)
+
+	clear(newFields)
+
+	// 复制现有字段
+	for k, v := range f.fields {
+		newFields[k] = v
+	}
+	// 添加新字段
+	for k, v := range fields {
+		newFields[k] = v
+	}
+
+	return &fieldLogger{logger: f.logger, fields: newFields}
+}
+
+func (f *fieldLogger) WithError(err error) ILogger {
+	return f.WithField("error", err.Error())
+}
+
+func (f *fieldLogger) WithContext(ctx context.Context) ILogger {
+	return f
+}
+
+// Clone 克隆当前Logger
+func (f *fieldLogger) Clone() ILogger {
+	newFields := make(map[string]any, len(f.fields))
+	for k, v := range f.fields {
+		newFields[k] = v
+	}
+	return &fieldLogger{logger: f.logger, fields: newFields}
 }
 
 // 兼容标准log包的方法
-func (l *Logger) Print(args ...interface{}) {
-	l.Info("%s", fmt.Sprint(args...))
+func (f *fieldLogger) Print(args ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	f.logger.logWithFields(INFO, fmt.Sprint(args...), f.fields)
 }
 
-func (l *Logger) Printf(format string, args ...interface{}) {
-	l.Info(format, args...)
+func (f *fieldLogger) Printf(format string, args ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	f.logger.logWithFields(INFO, fmt.Sprintf(format, args...), f.fields)
 }
 
-func (l *Logger) Println(args ...interface{}) {
-	l.Info("%s", fmt.Sprintln(args...))
+func (f *fieldLogger) Println(args ...any) {
+	if !f.logger.IsLevelEnabled(INFO) {
+		return
+	}
+	msg := fmt.Sprintln(args...)
+	f.logger.logWithFields(INFO, msg[:len(msg)-1], f.fields)
 }
 
-// parseKeysAndValues 解析键值对参数 - 优化版本，支持结构体对象自动解析
-func (l *Logger) parseKeysAndValues(keysAndValues ...interface{}) map[string]interface{} {
-	if len(keysAndValues) == 0 {
-		return nil
+// 返回错误的日志方法
+func (f *fieldLogger) DebugReturn(format string, args ...any) error {
+	f.Debug(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) InfoReturn(format string, args ...any) error {
+	f.Info(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) WarnReturn(format string, args ...any) error {
+	f.Warn(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) ErrorReturn(format string, args ...any) error {
+	f.Error(format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的上下文日志方法
+func (f *fieldLogger) DebugCtxReturn(ctx context.Context, format string, args ...any) error {
+	f.DebugContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) InfoCtxReturn(ctx context.Context, format string, args ...any) error {
+	f.InfoContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) WarnCtxReturn(ctx context.Context, format string, args ...any) error {
+	f.WarnContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+func (f *fieldLogger) ErrorCtxReturn(ctx context.Context, format string, args ...any) error {
+	f.ErrorContext(ctx, format, args...)
+	return fmt.Errorf(format, args...)
+}
+
+// 返回错误的键值对日志方法
+func (f *fieldLogger) DebugKVReturn(msg string, keysAndValues ...any) error {
+	f.DebugKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *fieldLogger) InfoKVReturn(msg string, keysAndValues ...any) error {
+	f.InfoKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *fieldLogger) WarnKVReturn(msg string, keysAndValues ...any) error {
+	f.WarnKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+func (f *fieldLogger) ErrorKVReturn(msg string, keysAndValues ...any) error {
+	f.ErrorKV(msg, keysAndValues...)
+	return fmt.Errorf("%s", msg)
+}
+
+// Console 相关方法
+func (f *fieldLogger) ConsoleGroup(label string, args ...any) {
+	f.logger.ConsoleGroup(label, args...)
+}
+
+func (f *fieldLogger) ConsoleGroupCollapsed(label string, args ...any) {
+	f.logger.ConsoleGroupCollapsed(label, args...)
+}
+
+func (f *fieldLogger) ConsoleGroupEnd() {
+	f.logger.ConsoleGroupEnd()
+}
+
+func (f *fieldLogger) ConsoleTable(data any) {
+	f.logger.ConsoleTable(data)
+}
+
+func (f *fieldLogger) ConsoleTime(label string) *Timer {
+	return f.logger.ConsoleTime(label)
+}
+
+func (f *fieldLogger) NewConsoleGroup() *ConsoleGroup {
+	return f.logger.getOrCreateConsoleGroup()
+}
+
+// 辅助方法：合并字段和键值对
+func (f *fieldLogger) mergeKV(keysAndValues ...any) []any {
+	totalLen := len(f.fields)*2 + len(keysAndValues)
+	result := make([]any, 0, totalLen)
+
+	// 添加现有字段
+	for k, v := range f.fields {
+		result = append(result, k, v)
 	}
 
-	// 如果只有一个参数且不是字符串，尝试作为对象解析
-	if len(keysAndValues) == 1 {
-		if objFields := parseObject(keysAndValues[0]); objFields != nil {
-			return objFields
+	// 添加传入的键值对
+	result = append(result, keysAndValues...)
+
+	return result
+}
+
+// 辅助方法：合并字段映射 - 使用对象池优化
+func (f *fieldLogger) mergeFieldsMap(fields map[string]any) map[string]any {
+	if len(fields) == 0 {
+		return f.fields
+	}
+
+	// 从对象池获取 map
+	merged := fieldMapPool.Get().(map[string]any)
+	clear(merged)
+
+	// 添加现有字段
+	for k, v := range f.fields {
+		merged[k] = v
+	}
+
+	// 添加传入的字段
+	for k, v := range fields {
+		merged[k] = v
+	}
+
+	return merged
+}
+
+// ============================================================================
+// 特殊场景日志方法（specialty）
+// ============================================================================
+
+// SpecialLogType 特殊日志类型
+type SpecialLogType struct {
+	emoji string
+	name  string
+}
+
+// 特殊日志类型定义
+var (
+	SuccessType     = SpecialLogType{"✅", "SUCCESS"}
+	LoadingType     = SpecialLogType{"⏳", "LOADING"}
+	ConfigType      = SpecialLogType{"⚙️", "CONFIG"}
+	StartType       = SpecialLogType{"🚀", "START"}
+	StopType        = SpecialLogType{"🛑", "STOP"}
+	DatabaseType    = SpecialLogType{"💾", "DATABASE"}
+	NetworkType     = SpecialLogType{"🌐", "NETWORK"}
+	SecurityType    = SpecialLogType{"🔒", "SECURITY"}
+	CacheType       = SpecialLogType{"🗄️", "CACHE"}
+	EnvironmentType = SpecialLogType{"🌍", "ENV"}
+)
+
+// logSpecial 记录特殊类型的日志（使用 INFO 级别）
+func (l *Logger) logSpecial(logType SpecialLogType, level LogLevel, format string, args ...any) {
+	if level < l.level {
+		return
+	}
+	message := fmt.Sprintf(format, args...)
+	l.ultraLog(level, fmt.Sprintf("%s [%s] %s", logType.emoji, logType.name, message))
+}
+
+// Success 成功日志（INFO 级别）
+func (l *Logger) Success(format string, args ...any) {
+	l.logSpecial(SuccessType, INFO, format, args...)
+}
+
+// Loading 加载日志（INFO 级别）
+func (l *Logger) Loading(format string, args ...any) {
+	l.logSpecial(LoadingType, INFO, format, args...)
+}
+
+// ConfigLog 配置日志（INFO 级别）
+func (l *Logger) ConfigLog(format string, args ...any) {
+	l.logSpecial(ConfigType, INFO, format, args...)
+}
+
+// Start 启动日志（INFO 级别）
+func (l *Logger) Start(format string, args ...any) {
+	l.logSpecial(StartType, INFO, format, args...)
+}
+
+// Stop 停止日志（INFO 级别）
+func (l *Logger) Stop(format string, args ...any) {
+	l.logSpecial(StopType, INFO, format, args...)
+}
+
+// Database 数据库日志（INFO 级别）
+func (l *Logger) Database(format string, args ...any) {
+	l.logSpecial(DatabaseType, INFO, format, args...)
+}
+
+// Network 网络日志（INFO 级别）
+func (l *Logger) Network(format string, args ...any) {
+	l.logSpecial(NetworkType, INFO, format, args...)
+}
+
+// Security 安全日志（SECURITY 级别）
+func (l *Logger) Security(format string, args ...any) {
+	l.logSpecial(SecurityType, SECURITY, format, args...)
+}
+
+// Cache 缓存日志（INFO 级别）
+func (l *Logger) Cache(format string, args ...any) {
+	l.logSpecial(CacheType, INFO, format, args...)
+}
+
+// Environment 环境日志（INFO 级别）
+func (l *Logger) Environment(format string, args ...any) {
+	l.logSpecial(EnvironmentType, INFO, format, args...)
+}
+
+// ============================================================================
+// 性能日志方法
+// ============================================================================
+
+// PerformanceLevel 性能级别定义
+type PerformanceLevel struct {
+	Threshold time.Duration
+	Emoji     string
+	Level     string
+}
+
+// 性能级别配置（按阈值从小到大排序）
+var performanceLevels = []PerformanceLevel{
+	{50 * time.Millisecond, "⚡", "EXCELLENT"},
+	{100 * time.Millisecond, "🏃", "FAST"},
+	{500 * time.Millisecond, "🚶", "NORMAL"},
+	{2 * time.Second, "🐢", "SLOW"},
+	{0, "🐌", "VERY_SLOW"}, // 0 表示默认值（最后一个）
+}
+
+// getPerformanceLevel 获取性能级别和表情符号
+func getPerformanceLevel(duration time.Duration) (emoji, level string) {
+	for _, pl := range performanceLevels {
+		if pl.Threshold == 0 || duration < pl.Threshold {
+			return pl.Emoji, pl.Level
 		}
 	}
-
-	// 预分配合适大小的map
-	fields := make(map[string]interface{}, len(keysAndValues)/2+1)
-
-	for i := 0; i < len(keysAndValues); i += 2 {
-		if i+1 < len(keysAndValues) {
-			// 优化字符串转换
-			key := toString(keysAndValues[i])
-			fields[key] = keysAndValues[i+1]
-		} else {
-			// 奇数个参数，最后一个作为无值key
-			key := toString(keysAndValues[i])
-			fields[key] = ""
-		}
-	}
-	return fields
+	return "🐌", "VERY_SLOW"
 }
 
-// toString 高效的字符串转换
-func toString(v interface{}) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	case fmt.Stringer:
-		return s.String()
+// Performance 性能日志（PERFORMANCE 级别，支持可选的详细信息）
+func (l *Logger) Performance(operation string, duration time.Duration, details ...map[string]any) {
+	if PERFORMANCE < l.level {
+		return
+	}
+
+	emoji, level := getPerformanceLevel(duration)
+	msg := fmt.Sprintf("%s [PERF-%s] %s completed in %v", emoji, level, operation, duration)
+
+	if len(details) > 0 && len(details[0]) > 0 {
+		msg += fmt.Sprintf(" | Details: %+v", details[0])
+	}
+
+	l.ultraLog(PERFORMANCE, msg)
+}
+
+// Timing 计时器辅助结构
+type Timing struct {
+	logger    *Logger
+	operation string
+	startTime time.Time
+	details   map[string]any
+}
+
+// StartTiming 开始计时
+func (l *Logger) StartTiming(operation string) *Timing {
+	return &Timing{
+		logger:    l,
+		operation: operation,
+		startTime: time.Now(),
+		details:   make(map[string]any),
+	}
+}
+
+// AddDetail 添加详细信息
+func (t *Timing) AddDetail(key string, value any) *Timing {
+	t.details[key] = value
+	return t
+}
+
+// End 结束计时并记录性能日志
+func (t *Timing) End() time.Duration {
+	duration := time.Since(t.startTime)
+	if len(t.details) > 0 {
+		t.logger.Performance(t.operation, duration, t.details)
+	} else {
+		t.logger.Performance(t.operation, duration)
+	}
+	return duration
+}
+
+// getProgressEmoji 根据进度百分比获取表情符号
+func getProgressEmoji(percentage float64) string {
+	switch {
+	case percentage == 100:
+		return "✅"
+	case percentage >= 75:
+		return "🔵"
+	case percentage >= 50:
+		return "🟡"
+	case percentage >= 25:
+		return "🟠"
 	default:
-		return fmt.Sprint(v)
+		return "🔴"
 	}
 }
 
-// parseObject 解析对象为 key-value map
-// 支持 struct、map[string]interface{}
-func parseObject(obj interface{}) map[string]interface{} {
-	if obj == nil {
-		return nil
+// Progress 进度日志（INFO 级别）
+func (l *Logger) Progress(current, total int, operation string) {
+	if INFO < l.level {
+		return
 	}
 
-	// 处理 map[string]interface{} (any 是 interface{} 的别名，无需重复处理)
-	if m, ok := obj.(map[string]interface{}); ok {
-		return m
+	percentage := float64(current) / float64(total) * 100
+	emoji := getProgressEmoji(percentage)
+	l.ultraLog(INFO, fmt.Sprintf("%s [PROGRESS] %s: %d/%d (%.1f%%)", emoji, operation, current, total, percentage))
+}
+
+// Milestone 里程碑日志（INFO 级别）
+func (l *Logger) Milestone(message string) {
+	if INFO < l.level {
+		return
+	}
+	l.ultraLog(INFO, fmt.Sprintf("🎯 [MILESTONE] %s", message))
+}
+
+// Health 健康检查日志（WARN 级别用于不健康，INFO 级别用于健康）
+func (l *Logger) Health(service string, status bool, details string) {
+	level := WARN
+	if status {
+		level = INFO
 	}
 
-	// 使用反射处理结构体
-	v := reflect.ValueOf(obj)
-
-	// 如果是指针，获取其指向的值
-	if v.Kind() == reflect.Ptr {
-		if v.IsNil() {
-			return nil
-		}
-		v = v.Elem()
+	if level < l.level {
+		return
 	}
 
-	// 只处理结构体类型
-	if v.Kind() != reflect.Struct {
-		return nil
+	emoji := "❌"
+	statusStr := "UNHEALTHY"
+	if status {
+		emoji = "✅"
+		statusStr = "HEALTHY"
 	}
 
-	t := v.Type()
-	fields := make(map[string]interface{}, v.NumField())
-
-	for i := 0; i < v.NumField(); i++ {
-		field := t.Field(i)
-		fieldValue := v.Field(i)
-
-		// 跳过未导出的字段
-		if !field.IsExported() {
-			continue
-		}
-
-		// 获取字段名，优先使用 json tag
-		fieldName := field.Name
-		if tag := field.Tag.Get("json"); tag != "" {
-			// 处理 json tag，去除 omitempty 等选项
-			if idx := strings.Index(tag, ","); idx != -1 {
-				tag = tag[:idx]
-			}
-			if tag != "" && tag != "-" {
-				fieldName = tag
-			}
-		}
-
-		// 获取字段值
-		fields[fieldName] = fieldValue.Interface()
+	detailStr := ""
+	if details != "" {
+		detailStr = fmt.Sprintf(" | %s", details)
 	}
 
-	return fields
+	l.ultraLog(level, fmt.Sprintf("%s [HEALTH] %s: %s%s", emoji, service, statusStr, detailStr))
 }
 
-// ========== 返回错误的日志方法 ==========
-
-// DebugReturn 记录调试日志并返回格式化的错误
-func (l *Logger) DebugReturn(format string, args ...interface{}) error {
-	l.log(DEBUG, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// InfoReturn 记录信息日志并返回格式化的错误
-func (l *Logger) InfoReturn(format string, args ...interface{}) error {
-	l.log(INFO, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// WarnReturn 记录警告日志并返回格式化的错误
-func (l *Logger) WarnReturn(format string, args ...interface{}) error {
-	l.log(WARN, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// ErrorReturn 记录错误日志并返回格式化的错误
-func (l *Logger) ErrorReturn(format string, args ...interface{}) error {
-	l.log(ERROR, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// DebugCtxReturn 记录带上下文的调试日志并返回格式化的错误
-func (l *Logger) DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	l.DebugContext(ctx, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// InfoCtxReturn 记录带上下文的信息日志并返回格式化的错误
-func (l *Logger) InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	l.InfoContext(ctx, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// WarnCtxReturn 记录带上下文的警告日志并返回格式化的错误
-func (l *Logger) WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	l.WarnContext(ctx, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// ErrorCtxReturn 记录带上下文的错误日志并返回格式化的错误
-func (l *Logger) ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	l.ErrorContext(ctx, format, args...)
-	return fmt.Errorf(format, args...)
-}
-
-// DebugKVReturn 记录带键值对的调试日志并返回错误
-func (l *Logger) DebugKVReturn(msg string, keysAndValues ...interface{}) error {
-	l.DebugKV(msg, keysAndValues...)
-	return fmt.Errorf("%s", msg)
-}
-
-// InfoKVReturn 记录带键值对的信息日志并返回错误
-func (l *Logger) InfoKVReturn(msg string, keysAndValues ...interface{}) error {
-	l.InfoKV(msg, keysAndValues...)
-	return fmt.Errorf("%s", msg)
-}
-
-// WarnKVReturn 记录带键值对的警告日志并返回错误
-func (l *Logger) WarnKVReturn(msg string, keysAndValues ...interface{}) error {
-	l.WarnKV(msg, keysAndValues...)
-	return fmt.Errorf("%s", msg)
-}
-
-// ErrorKVReturn 记录带键值对的错误日志并返回错误
-func (l *Logger) ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
-	l.ErrorKV(msg, keysAndValues...)
-	return fmt.Errorf("%s", msg)
-}
-
-// ========== 全局返回错误的日志方法 ==========
-
-// DebugReturn 全局调试日志并返回错误
-func DebugReturn(format string, args ...interface{}) error {
-	return defaultLogger.DebugReturn(format, args...)
-}
-
-// InfoReturn 全局信息日志并返回错误
-func InfoReturn(format string, args ...interface{}) error {
-	return defaultLogger.InfoReturn(format, args...)
-}
-
-// WarnReturn 全局警告日志并返回错误
-func WarnReturn(format string, args ...interface{}) error {
-	return defaultLogger.WarnReturn(format, args...)
-}
-
-// ErrorReturn 全局错误日志并返回错误
-func ErrorReturn(format string, args ...interface{}) error {
-	return defaultLogger.ErrorReturn(format, args...)
-}
-
-// DebugCtxReturn 全局带上下文的调试日志并返回错误
-func DebugCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	return defaultLogger.DebugCtxReturn(ctx, format, args...)
-}
-
-// InfoCtxReturn 全局带上下文的信息日志并返回错误
-func InfoCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	return defaultLogger.InfoCtxReturn(ctx, format, args...)
-}
-
-// WarnCtxReturn 全局带上下文的警告日志并返回错误
-func WarnCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	return defaultLogger.WarnCtxReturn(ctx, format, args...)
-}
-
-// ErrorCtxReturn 全局带上下文的错误日志并返回错误
-func ErrorCtxReturn(ctx context.Context, format string, args ...interface{}) error {
-	return defaultLogger.ErrorCtxReturn(ctx, format, args...)
-}
-
-// DebugKVReturn 全局带键值对的调试日志并返回错误
-func DebugKVReturn(msg string, keysAndValues ...interface{}) error {
-	return defaultLogger.DebugKVReturn(msg, keysAndValues...)
-}
-
-// InfoKVReturn 全局带键值对的信息日志并返回错误
-func InfoKVReturn(msg string, keysAndValues ...interface{}) error {
-	return defaultLogger.InfoKVReturn(msg, keysAndValues...)
-}
-
-// WarnKVReturn 全局带键值对的警告日志并返回错误
-func WarnKVReturn(msg string, keysAndValues ...interface{}) error {
-	return defaultLogger.WarnKVReturn(msg, keysAndValues...)
-}
-
-// ErrorKVReturn 全局带键值对的错误日志并返回错误
-func ErrorKVReturn(msg string, keysAndValues ...interface{}) error {
-	return defaultLogger.ErrorKVReturn(msg, keysAndValues...)
-}
-
-// ============================================================================
-// Console 风格日志方法实现
-// ============================================================================
-
-// getOrCreateConsoleGroup 获取或创建 ConsoleGroup（延迟初始化）
-func (l *Logger) getOrCreateConsoleGroup() *ConsoleGroup {
-	l.consoleGroupOnce.Do(func() {
-		l.consoleGroup = &ConsoleGroup{
-			logger:          l,
-			indentLevel:     0,
-			collapsed:       false,
-			collapsedLevels: make([]bool, 0),
-		}
-	})
-	return l.consoleGroup
-}
-
-// ConsoleGroup 开始一个新的日志分组
-func (l *Logger) ConsoleGroup(label string, args ...interface{}) {
-	cg := l.getOrCreateConsoleGroup()
-	cg.Group(label, args...)
-}
-
-// ConsoleGroupCollapsed 开始一个折叠的日志分组
-func (l *Logger) ConsoleGroupCollapsed(label string, args ...interface{}) {
-	cg := l.getOrCreateConsoleGroup()
-	cg.GroupCollapsed(label, args...)
-}
-
-// ConsoleGroupEnd 结束当前分组
-func (l *Logger) ConsoleGroupEnd() {
-	cg := l.getOrCreateConsoleGroup()
-	cg.GroupEnd()
-}
-
-// ConsoleTable 显示表格
-func (l *Logger) ConsoleTable(data interface{}) {
-	cg := l.getOrCreateConsoleGroup()
-	cg.Table(data)
-}
-
-// ConsoleTime 开始计时
-func (l *Logger) ConsoleTime(label string) *Timer {
-	cg := l.getOrCreateConsoleGroup()
-	return cg.Time(label)
+// Audit 审计日志（AUDIT 级别）
+func (l *Logger) Audit(action, user, resource, result string) {
+	if AUDIT < l.level {
+		return
+	}
+	l.ultraLog(AUDIT, fmt.Sprintf("📋 [AUDIT] User: %s | Action: %s | Resource: %s | Result: %s", user, action, resource, result))
 }

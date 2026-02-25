@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-08 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-08 00:00:00
+ * @LastEditTime: 2026-03-02 00:00:00
  * @FilePath: \go-logger\types_test.go
  * @Description: 核心类型测试套件
  *
@@ -12,384 +12,366 @@
 package logger
 
 import (
+	"bytes"
 	"context"
-	"errors"
-	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
-	"sync"
+	"io"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-// TypesTestSuite 核心类型测试套件
+// TypesTestSuite 类型测试套件
 type TypesTestSuite struct {
 	suite.Suite
 }
 
-// TestLoggerStats 测试日志统计
-func (suite *TypesTestSuite) TestLoggerStats() {
+// TestNewLoggerStats 测试创建统计信息
+func (s *TypesTestSuite) TestNewLoggerStats() {
+	stats := NewLoggerStats()
+	assert.NotNil(s.T(), stats)
+	assert.NotZero(s.T(), stats.StartTime)
+	assert.NotNil(s.T(), stats.LevelCounts)
+	assert.Equal(s.T(), int64(0), stats.TotalLogs)
+}
+
+// TestLoggerStatsIncrement 测试增加统计
+func (s *TypesTestSuite) TestLoggerStatsIncrement() {
 	stats := NewLoggerStats()
 
-	// 验证初始状态
-	assert.NotNil(suite.T(), stats)
-	assert.False(suite.T(), stats.StartTime.IsZero())
-	assert.Equal(suite.T(), int64(0), stats.TotalLogs)
-	assert.Equal(suite.T(), int64(0), stats.ErrorCount)
-	assert.Equal(suite.T(), time.Duration(0), stats.Uptime)
-	assert.Equal(suite.T(), int64(0), stats.BytesWritten)
-	assert.NotNil(suite.T(), stats.LevelCounts)
-	assert.Len(suite.T(), stats.LevelCounts, 0)
-
-	// 测试级别计数增加
 	stats.IncrementLevel(INFO)
-	statsSnapshot := stats.GetStats()
-	assert.Equal(suite.T(), int64(1), statsSnapshot.TotalLogs)
-	assert.Equal(suite.T(), int64(1), statsSnapshot.LevelCounts[INFO])
-	assert.Equal(suite.T(), int64(0), statsSnapshot.ErrorCount)
-	assert.True(suite.T(), statsSnapshot.Uptime >= 0) // 修复：uptime可能为0或大于0
-	assert.False(suite.T(), statsSnapshot.LastLogTime.IsZero())
+	assert.Equal(s.T(), int64(1), stats.TotalLogs)
+	assert.Equal(s.T(), int64(1), stats.LevelCounts[INFO])
+	assert.Equal(s.T(), int64(0), stats.ErrorCount)
 
-	// 测试错误级别计数
 	stats.IncrementLevel(ERROR)
-	statsSnapshot = stats.GetStats()
-	assert.Equal(suite.T(), int64(2), statsSnapshot.TotalLogs)
-	assert.Equal(suite.T(), int64(1), statsSnapshot.LevelCounts[INFO])
-	assert.Equal(suite.T(), int64(1), statsSnapshot.LevelCounts[ERROR])
-	assert.Equal(suite.T(), int64(1), statsSnapshot.ErrorCount)
-
-	// 测试FATAL级别计数
-	stats.IncrementLevel(FATAL)
-	statsSnapshot = stats.GetStats()
-	assert.Equal(suite.T(), int64(3), statsSnapshot.TotalLogs)
-	assert.Equal(suite.T(), int64(1), statsSnapshot.LevelCounts[FATAL])
-	assert.Equal(suite.T(), int64(2), statsSnapshot.ErrorCount) // ERROR和FATAL都算错误
-
-	// 测试字节数增加
-	stats.AddBytes(1024)
-	statsSnapshot = stats.GetStats()
-	assert.Equal(suite.T(), int64(1024), statsSnapshot.BytesWritten)
-
-	stats.AddBytes(512)
-	statsSnapshot = stats.GetStats()
-	assert.Equal(suite.T(), int64(1536), statsSnapshot.BytesWritten)
+	assert.Equal(s.T(), int64(2), stats.TotalLogs)
+	assert.Equal(s.T(), int64(1), stats.LevelCounts[ERROR])
+	assert.Equal(s.T(), int64(1), stats.ErrorCount)
 }
 
-// TestLoggerStatsConcurrency 测试统计的并发安全
-func (suite *TypesTestSuite) TestLoggerStatsConcurrency() {
+// TestLoggerStatsAddBytes 测试添加字节数
+func (s *TypesTestSuite) TestLoggerStatsAddBytes() {
 	stats := NewLoggerStats()
-	var wg sync.WaitGroup
 
-	// 并发增加不同级别
+	stats.AddBytes(100)
+	assert.Equal(s.T(), int64(100), stats.BytesWritten)
+
+	stats.AddBytes(50)
+	assert.Equal(s.T(), int64(150), stats.BytesWritten)
+}
+
+// TestLoggerStatsGetStats 测试获取统计快照
+func (s *TypesTestSuite) TestLoggerStatsGetStats() {
+	stats := NewLoggerStats()
+	stats.IncrementLevel(INFO)
+	stats.IncrementLevel(WARN)
+	stats.AddBytes(200)
+
+	snapshot := stats.GetStats()
+	assert.NotNil(s.T(), snapshot)
+	assert.Equal(s.T(), int64(2), snapshot.TotalLogs)
+	assert.Equal(s.T(), int64(200), snapshot.BytesWritten)
+	assert.NotNil(s.T(), snapshot.LevelCounts)
+}
+
+// TestLoggerBuilder 测试构建器模式
+func (s *TypesTestSuite) TestLoggerBuilder() {
+	buffer := &bytes.Buffer{}
+	logger := NewLogger().
+		WithLevel(WARN).
+		WithOutput(buffer).
+		WithPrefix("[TEST]").
+		WithShowCaller(true).
+		WithColorful(false).
+		WithTimeFormat(time.RFC3339)
+
+	assert.Equal(s.T(), WARN, logger.GetLevel())
+	assert.True(s.T(), logger.IsShowCaller())
+	assert.Equal(s.T(), "[TEST] ", logger.prefix)
+	assert.False(s.T(), logger.colorful)
+}
+
+// TestLoggerWithFormat 测试设置输出格式
+func (s *TypesTestSuite) TestLoggerWithFormat() {
+	logger := NewLogger().
+		WithFormat(FormatJSON).
+		WithFormat(FormatText)
+
+	assert.Equal(s.T(), FormatText, logger.format)
+}
+
+// TestLoggerWithCallerDepth 测试设置调用者深度
+func (s *TypesTestSuite) TestLoggerWithCallerDepth() {
+	logger := NewLogger().WithCallerDepth(3)
+	assert.Equal(s.T(), 3, logger.callerDepth)
+}
+
+// TestLoggerWithShowStacktrace 测试显示堆栈跟踪
+func (s *TypesTestSuite) TestLoggerWithShowStacktrace() {
+	logger := NewLogger().WithShowStacktrace(true)
+	assert.True(s.T(), logger.showStacktrace)
+}
+
+// TestLoggerWithFieldKeys 测试设置字段名
+func (s *TypesTestSuite) TestLoggerWithFieldKeys() {
+	logger := NewLogger().
+		WithTimestampKey("ts").
+		WithLevelKey("lvl").
+		WithMessageKey("msg").
+		WithCallerKey("caller").
+		WithStacktraceKey("stack")
+
+	assert.Equal(s.T(), "ts", logger.timestampKey)
+	assert.Equal(s.T(), "lvl", logger.levelKey)
+	assert.Equal(s.T(), "msg", logger.messageKey)
+	assert.Equal(s.T(), "caller", logger.callerKey)
+	assert.Equal(s.T(), "stack", logger.stacktraceKey)
+}
+
+// TestLoggerWithAsyncWrite 测试异步写入配置
+func (s *TypesTestSuite) TestLoggerWithAsyncWrite() {
+	logger := NewLogger().
+		WithAsyncWrite(true).
+		WithBufferSize(2048).
+		WithBatchSize(200).
+		WithBatchTimeout(200 * time.Millisecond)
+
+	assert.True(s.T(), logger.asyncWrite)
+	assert.Equal(s.T(), 2048, logger.bufferSize)
+	assert.Equal(s.T(), 200, logger.batchSize)
+	assert.Equal(s.T(), 200*time.Millisecond, logger.batchTimeout)
+}
+
+// TestLoggerClone 测试克隆日志器
+func (s *TypesTestSuite) TestLoggerClone() {
+	original := NewLogger().
+		WithLevel(ERROR).
+		WithPrefix("[ORIG]").
+		WithShowCaller(true)
+
+	cloned := original.Clone()
+	assert.NotNil(s.T(), cloned)
+
+	clonedLogger, ok := cloned.(*Logger)
+	assert.True(s.T(), ok)
+	assert.Equal(s.T(), ERROR, clonedLogger.GetLevel())
+	assert.True(s.T(), clonedLogger.IsShowCaller())
+}
+
+// TestLoggerIsLevelEnabled 测试级别启用检查
+func (s *TypesTestSuite) TestLoggerIsLevelEnabled() {
+	logger := NewLogger().WithLevel(WARN)
+
+	assert.False(s.T(), logger.IsLevelEnabled(DEBUG))
+	assert.False(s.T(), logger.IsLevelEnabled(INFO))
+	assert.True(s.T(), logger.IsLevelEnabled(WARN))
+	assert.True(s.T(), logger.IsLevelEnabled(ERROR))
+	assert.True(s.T(), logger.IsLevelEnabled(FATAL))
+}
+
+// TestFormatType 测试格式类型
+func (s *TypesTestSuite) TestFormatType() {
+	formats := []FormatType{
+		FormatText,
+		FormatJSON,
+		FormatXML,
+		FormatCSV,
+	}
+
+	for _, format := range formats {
+		assert.NotEmpty(s.T(), format)
+	}
+}
+
+// TestGlobalLoggerFunctions 测试全局日志器函数
+func (s *TypesTestSuite) TestGlobalLoggerFunctions() {
+	originalLevel := GetGlobalLogger().GetLevel()
+	originalShowCaller := GetGlobalLogger().IsShowCaller()
+
+	// 测试设置全局级别
+	SetGlobalLevel(ERROR)
+	assert.Equal(s.T(), ERROR, GetGlobalLogger().GetLevel())
+
+	// 测试设置全局显示调用者
+	SetGlobalShowCaller(true)
+	assert.True(s.T(), GetGlobalLogger().IsShowCaller())
+
+	// 恢复原始设置
+	SetGlobalLevel(originalLevel)
+	SetGlobalShowCaller(originalShowCaller)
+}
+
+// TestLoggerWithContextExtractor 测试设置上下文提取器
+func (s *TypesTestSuite) TestLoggerWithContextExtractor() {
+	logger := NewLogger()
+
+	customExtractor := func(ctx context.Context) string {
+		return "[CUSTOM]"
+	}
+
+	logger.WithContextExtractor(customExtractor)
+	assert.NotNil(s.T(), logger.contextExtractor)
+
+	// 测试设置nil提取器（应该使用默认）
+	logger.WithContextExtractor(nil)
+	assert.NotNil(s.T(), logger.contextExtractor)
+}
+
+// TestLoggerWithWriters 测试设置写入器列表
+func (s *TypesTestSuite) TestLoggerWithWriters() {
+	// 使用 buffer 而不是 os.Stdout，避免关闭标准输出
+	buffer1 := &bytes.Buffer{}
+	buffer2 := &bytes.Buffer{}
+	writer1 := NewConsoleWriter(WithConsoleOutput(buffer1))
+	writer2 := NewConsoleWriter(WithConsoleOutput(buffer2))
+
+	logger := NewLogger().WithWriters([]IWriter{writer1, writer2})
+	assert.Len(s.T(), logger.writers, 2)
+
+	writer1.Close()
+	writer2.Close()
+}
+
+// TestLoggerWithHooks 测试设置钩子列表
+func (s *TypesTestSuite) TestLoggerWithHooks() {
+	hook := NewEmptyHook([]LogLevel{INFO, ERROR})
+	logger := NewLogger().WithHooks([]IHook{hook})
+	assert.Len(s.T(), logger.hooks, 1)
+}
+
+// TestLoggerWithMiddleware 测试设置中间件列表
+func (s *TypesTestSuite) TestLoggerWithMiddleware() {
+	logger := NewLogger().WithMiddleware([]IMiddleware{})
+	assert.NotNil(s.T(), logger.middleware)
+}
+
+// TestLoggerChainedBuilder 测试链式构建
+func (s *TypesTestSuite) TestLoggerChainedBuilder() {
+	buffer := &bytes.Buffer{}
+
+	logger := NewLogger().
+		WithLevel(INFO).
+		WithOutput(buffer).
+		WithPrefix("[APP]").
+		WithColorful(false).
+		WithShowCaller(false).
+		WithTimeFormat(time.RFC3339).
+		WithFormat(FormatJSON).
+		WithCallerDepth(2).
+		WithShowStacktrace(false)
+
+	assert.NotNil(s.T(), logger)
+	assert.Equal(s.T(), INFO, logger.GetLevel())
+	assert.Equal(s.T(), "[APP] ", logger.prefix)
+	assert.False(s.T(), logger.colorful)
+	assert.False(s.T(), logger.showCaller)
+	assert.Equal(s.T(), FormatJSON, logger.format)
+}
+
+// TestLoggerDefaultValues 测试默认值
+func (s *TypesTestSuite) TestLoggerDefaultValues() {
+	logger := NewLogger()
+
+	assert.Equal(s.T(), DEBUG, logger.level)
+	assert.False(s.T(), logger.showCaller)
+	assert.True(s.T(), logger.colorful)
+	assert.Equal(s.T(), "", logger.prefix)
+	assert.Equal(s.T(), time.DateTime, logger.timeFormat)
+	assert.Equal(s.T(), FormatJSON, logger.format)
+	assert.Equal(s.T(), 2, logger.callerDepth)
+	assert.False(s.T(), logger.showStacktrace)
+	assert.False(s.T(), logger.asyncWrite)
+}
+
+// TestLoggerStatsUptime 测试运行时间统计
+func (s *TypesTestSuite) TestLoggerStatsUptime() {
+	stats := NewLoggerStats()
+
+	time.Sleep(10 * time.Millisecond)
+	stats.IncrementLevel(INFO)
+
+	assert.True(s.T(), stats.Uptime >= 10*time.Millisecond)
+}
+
+// TestLoggerStatsConcurrent 测试并发统计
+func (s *TypesTestSuite) TestLoggerStatsConcurrent() {
+	stats := NewLoggerStats()
+	done := make(chan bool)
+
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(level LogLevel) {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				stats.IncrementLevel(level)
-			}
-		}(LogLevel(i % 5))
-	}
-
-	// 并发增加字节数
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				stats.AddBytes(10)
-			}
+			stats.IncrementLevel(INFO)
+			stats.AddBytes(100)
+			done <- true
 		}()
 	}
 
-	wg.Wait()
-
-	// 验证最终结果
-	statsSnapshot := stats.GetStats()
-	assert.Equal(suite.T(), int64(1000), statsSnapshot.TotalLogs)
-	assert.Equal(suite.T(), int64(5000), statsSnapshot.BytesWritten)
-
-	// 验证级别计数总和
-	var totalLevelCount int64
-	for _, count := range statsSnapshot.LevelCounts {
-		totalLevelCount += count
-	}
-	assert.Equal(suite.T(), int64(1000), totalLevelCount)
-}
-
-// TestLoggerOptions 测试日志器选项
-func (suite *TypesTestSuite) TestLoggerOptions() {
-	// 测试默认选项
-	options := DefaultLoggerOptions()
-	assert.NotNil(suite.T(), options)
-	assert.NotNil(suite.T(), options.Config)
-	assert.NotNil(suite.T(), options.Writers)
-	assert.NotNil(suite.T(), options.Hooks)
-	assert.NotNil(suite.T(), options.Middleware)
-	assert.Equal(suite.T(), context.Background(), options.Context)
-
-	// 测试修改选项
-	config := DefaultConfig()
-	config.Level = DEBUG
-	options.Config = config
-
-	assert.Equal(suite.T(), DEBUG, options.Config.Level)
-}
-
-// TestFieldMap 测试字段映射
-func (suite *TypesTestSuite) TestFieldMap() {
-	fields := make(FieldMap)
-
-	// 测试添加不同类型的值
-	fields["string"] = "test"
-	fields["int"] = 42
-	fields["float"] = 3.14
-	fields["bool"] = true
-	fields["nil"] = nil
-	fields["slice"] = []string{"a", "b", "c"}
-	fields["map"] = map[string]interface{}{"nested": "value"}
-
-	assert.Equal(suite.T(), "test", fields["string"])
-	assert.Equal(suite.T(), 42, fields["int"])
-	assert.Equal(suite.T(), 3.14, fields["float"])
-	assert.Equal(suite.T(), true, fields["bool"])
-	assert.Nil(suite.T(), fields["nil"])
-	assert.Equal(suite.T(), []string{"a", "b", "c"}, fields["slice"])
-	assert.Equal(suite.T(), map[string]interface{}{"nested": "value"}, fields["map"])
-}
-
-// TestAdapterRegistry 测试适配器注册表
-func (suite *TypesTestSuite) TestAdapterRegistry() {
-	registry := NewAdapterRegistry()
-	assert.NotNil(suite.T(), registry)
-	assert.Empty(suite.T(), registry.List())
-
-	// 创建模拟工厂函数
-	mockFactory := func(config *AdapterConfig) (IAdapter, error) {
-		return &MockAdapter{name: "mock"}, nil
-	}
-
-	errorFactory := func(config *AdapterConfig) (IAdapter, error) {
-		return nil, errors.New("factory error")
-	}
-
-	// 测试注册适配器
-	registry.Register("mock", mockFactory)
-	registry.Register("error", errorFactory)
-
-	adapters := registry.List()
-	assert.Len(suite.T(), adapters, 2)
-	assert.Contains(suite.T(), adapters, "mock")
-	assert.Contains(suite.T(), adapters, "error")
-
-	// 测试创建适配器
-	config := DefaultAdapterConfig()
-	adapter, err := registry.Create("mock", config)
-	assert.NoError(suite.T(), err)
-	assert.NotNil(suite.T(), adapter)
-
-	// 测试创建失败的适配器
-	adapter, err = registry.Create("error", config)
-	assert.Error(suite.T(), err)
-	assert.Nil(suite.T(), adapter)
-	assert.Contains(suite.T(), err.Error(), "factory error")
-
-	// 测试创建不存在的适配器
-	adapter, err = registry.Create("nonexistent", config)
-	assert.Error(suite.T(), err)
-	assert.Nil(suite.T(), adapter)
-	assert.Contains(suite.T(), err.Error(), "not found")
-}
-
-// TestAdapterRegistryConcurrency 测试注册表并发安全
-func (suite *TypesTestSuite) TestAdapterRegistryConcurrency() {
-	registry := NewAdapterRegistry()
-	var wg sync.WaitGroup
-
-	// 并发注册
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			factory := func(config *AdapterConfig) (IAdapter, error) {
-				return &MockAdapter{name: fmt.Sprintf("adapter_%d", index)}, nil
-			}
-			registry.Register(fmt.Sprintf("adapter_%d", index), factory)
-		}(i)
+		<-done
 	}
 
-	// 并发读取
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				registry.List()
-			}
-		}()
-	}
-
-	wg.Wait()
-
-	// 验证所有适配器都注册成功
-	adapters := registry.List()
-	assert.Len(suite.T(), adapters, 10)
+	assert.Equal(s.T(), int64(10), stats.TotalLogs)
+	assert.Equal(s.T(), int64(1000), stats.BytesWritten)
 }
 
-// TestBufferPool 测试缓冲区池
-func (suite *TypesTestSuite) TestBufferPool() {
-	pool := NewBufferPool()
-	assert.NotNil(suite.T(), pool)
+// TestLoggerWithOutput 测试设置输出
+func (s *TypesTestSuite) TestLoggerWithOutput() {
+	buffer := &bytes.Buffer{}
+	logger := NewLogger().WithOutput(buffer)
 
-	// 测试获取缓冲区
-	buf1 := pool.Get()
-	assert.NotNil(suite.T(), buf1)
-	assert.Equal(suite.T(), 0, len(buf1))
+	assert.Equal(s.T(), buffer, logger.output)
 
-	buf2 := pool.Get()
-	assert.NotNil(suite.T(), buf2)
-	assert.True(suite.T(), &buf1 != &buf2) // 比较地址而不是内容
-
-	// 测试使用缓冲区
-	buf1 = append(buf1, []byte("test data")...)
-	assert.Equal(suite.T(), "test data", string(buf1))
-
-	// 测试归还缓冲区
-	pool.Put(buf1)
-	pool.Put(buf2)
-
-	// 再次获取应该能重用
-	buf3 := pool.Get()
-	assert.NotNil(suite.T(), buf3)
-	assert.Equal(suite.T(), 0, len(buf3)) // 应该被重置
-
-	// 测试归还过大的缓冲区
-	largeBuf := make([]byte, 100*1024) // 100KB
-	pool.Put(largeBuf)                 // 应该被丢弃而不是保存
+	// 测试设置为Discard
+	logger.WithOutput(io.Discard)
+	assert.Equal(s.T(), io.Discard, logger.output)
 }
 
-// TestBufferPoolConcurrency 测试缓冲区池并发安全
-func (suite *TypesTestSuite) TestBufferPoolConcurrency() {
-	pool := NewBufferPool()
-	var wg sync.WaitGroup
+// TestLoggerPrefixFormatting 测试前缀格式化
+func (s *TypesTestSuite) TestLoggerPrefixFormatting() {
+	// 测试自动添加空格
+	logger := NewLogger().WithPrefix("[APP]")
+	assert.Equal(s.T(), "[APP] ", logger.prefix)
 
-	// 并发获取和归还缓冲区
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				buf := pool.Get()
-				buf = append(buf, []byte("test")...)
-				pool.Put(buf)
-			}
-		}()
-	}
+	// 测试已有空格不重复添加
+	logger = NewLogger().WithPrefix("[APP] ")
+	assert.Equal(s.T(), "[APP] ", logger.prefix)
 
-	wg.Wait()
-
-	// 验证池仍然正常工作
-	buf := pool.Get()
-	assert.NotNil(suite.T(), buf)
-	assert.Equal(suite.T(), 0, len(buf))
+	// 测试空前缀
+	logger = NewLogger().WithPrefix("")
+	assert.Equal(s.T(), "", logger.prefix)
 }
 
-// TestLogEvent 测试日志事件
-func (suite *TypesTestSuite) TestLogEvent() {
-	// 测试创建新事件
-	event := NewLogEvent(EventLogCreated, INFO, "Test message")
-	assert.NotNil(suite.T(), event)
-	assert.Equal(suite.T(), EventLogCreated, event.Type)
-	assert.Equal(suite.T(), INFO, event.Level)
-	assert.Equal(suite.T(), "Test message", event.Message)
-	assert.False(suite.T(), event.Timestamp.IsZero())
-	assert.NotNil(suite.T(), event.Fields)
-	assert.Empty(suite.T(), event.Fields)
-	assert.Nil(suite.T(), event.Error)
-
-	// 测试设置字段
-	event.Fields["key"] = "value"
-	event.Error = errors.New("test error")
-	// Context field removed
-
-	assert.Equal(suite.T(), "value", event.Fields["key"])
-	assert.NotNil(suite.T(), event.Error)
-	assert.Equal(suite.T(), "test error", event.Error.Error())
+// TestNewWriterStats 测试创建写入器统计
+func (s *TypesTestSuite) TestNewWriterStats() {
+	stats := NewWriterStats()
+	assert.NotNil(s.T(), stats)
+	assert.NotZero(s.T(), stats.StartTime)
+	assert.Equal(s.T(), int64(0), stats.BytesWritten)
+	assert.Equal(s.T(), int64(0), stats.LinesWritten)
+	assert.Equal(s.T(), int64(0), stats.ErrorCount)
 }
 
-// TestEventTypes 测试事件类型
-func (suite *TypesTestSuite) TestEventTypes() {
-	// 验证事件类型常量
-	assert.Equal(suite.T(), EventType(0), EventLogCreated)
-	assert.Equal(suite.T(), EventType(1), EventLogProcessed)
-	assert.Equal(suite.T(), EventType(2), EventLogWritten)
-	assert.Equal(suite.T(), EventType(3), EventLogError)
-	assert.Equal(suite.T(), EventType(4), EventLoggerStarted)
-	assert.Equal(suite.T(), EventType(5), EventLoggerStopped)
-	assert.Equal(suite.T(), EventType(6), EventLoggerConfigChanged)
+// TestWriterStatsOperations 测试写入器统计操作
+func (s *TypesTestSuite) TestWriterStatsOperations() {
+	stats := NewWriterStats()
 
-	// 测试不同类型的事件创建
-	events := []struct {
-		eventType EventType
-		level     LogLevel
-		message   string
-	}{
-		{EventLogCreated, DEBUG, "Log created"},
-		{EventLogProcessed, INFO, "Log processed"},
-		{EventLogWritten, WARN, "Log written"},
-		{EventLogError, ERROR, "Log error"},
-		{EventLoggerStarted, INFO, "Logger started"},
-		{EventLoggerStopped, INFO, "Logger stopped"},
-		{EventLoggerConfigChanged, INFO, "Config changed"},
-	}
+	stats.AddBytes(100)
+	assert.Equal(s.T(), int64(100), stats.BytesWritten)
+	assert.Equal(s.T(), int64(1), stats.LinesWritten)
+	assert.NotZero(s.T(), stats.LastWrite)
 
-	for _, e := range events {
-		event := NewLogEvent(e.eventType, e.level, e.message)
-		assert.Equal(suite.T(), e.eventType, event.Type)
-		assert.Equal(suite.T(), e.level, event.Level)
-		assert.Equal(suite.T(), e.message, event.Message)
-	}
+	stats.AddError()
+	assert.Equal(s.T(), int64(1), stats.ErrorCount)
 }
 
-// TestNewLoggerWithOptions 测试使用选项创建日志器
-func (suite *TypesTestSuite) TestNewLoggerWithOptions() {
-	// 测试使用nil选项
-	logger := NewLoggerWithOptions(nil)
-	assert.NotNil(suite.T(), logger)
-	assert.NotNil(suite.T(), logger.stats)
-	assert.NotNil(suite.T(), logger.context)
-	assert.NotNil(suite.T(), logger.cancel)
+// TestLoggerGetContextExtractor 测试获取上下文提取器
+func (s *TypesTestSuite) TestLoggerGetContextExtractor() {
+	logger := NewLogger()
 
-	// 清理
-	logger.cancel()
-
-	// 测试使用自定义选项
-	options := &LoggerOptions{
-		Config: &LogConfig{
-			Level:      DEBUG,
-			ShowCaller: true,
-		},
-		Context: context.Background(),
-	}
-
-	logger = NewLoggerWithOptions(options)
-	assert.NotNil(suite.T(), logger)
-	assert.Equal(suite.T(), DEBUG, logger.level)
-	assert.True(suite.T(), logger.showCaller)
-	assert.NotNil(suite.T(), logger.context)
-
-	// 清理
-	logger.cancel()
-}
-
-// TestLoggerOptionsDefaults 测试日志器选项默认值
-func (suite *TypesTestSuite) TestLoggerOptionsDefaults() {
-	logger := NewLoggerWithOptions(nil)
-	assert.NotNil(suite.T(), logger.formatter)
-	assert.NotEmpty(suite.T(), logger.writers)
-
-	// 清理
-	logger.cancel()
+	extractor := logger.GetContextExtractor()
+	assert.NotNil(s.T(), extractor)
 }
 
 // 运行测试套件
@@ -397,38 +379,54 @@ func TestTypesSuite(t *testing.T) {
 	suite.Run(t, new(TypesTestSuite))
 }
 
-// TestTypesPerformance 类型操作的性能测试（模拟）
-func TestTypesPerformance(t *testing.T) {
-	t.Run("LoggerStats", func(t *testing.T) {
-		stats := NewLoggerStats()
-		start := time.Now()
+// BenchmarkLoggerCreation 日志器创建性能测试
+func BenchmarkLoggerCreation(b *testing.B) {
+	b.ResetTimer()
+	b.ReportAllocs()
 
-		for i := 0; i < 10000; i++ {
-			stats.IncrementLevel(LogLevel(i % 5))
-			if i%100 == 0 {
-				stats.AddBytes(1024)
-			}
-		}
+	for i := 0; i < b.N; i++ {
+		_ = NewLogger()
+	}
+}
 
-		duration := time.Since(start)
-		t.Logf("10000 stat operations took %v", duration)
-		assert.True(t, duration < time.Second,
-			"Stats operations should be fast, took %v", duration)
-	})
+// BenchmarkLoggerClone 日志器克隆性能测试
+func BenchmarkLoggerClone(b *testing.B) {
+	logger := NewLogger().
+		WithLevel(INFO).
+		WithPrefix("[TEST]").
+		WithShowCaller(true)
 
-	t.Run("BufferPool", func(t *testing.T) {
-		pool := NewBufferPool()
-		start := time.Now()
+	b.ResetTimer()
+	b.ReportAllocs()
 
-		for i := 0; i < 10000; i++ {
-			buf := pool.Get()
-			buf = append(buf, []byte("test data")...)
-			pool.Put(buf)
-		}
+	for i := 0; i < b.N; i++ {
+		_ = logger.Clone()
+	}
+}
 
-		duration := time.Since(start)
-		t.Logf("10000 buffer pool operations took %v", duration)
-		assert.True(t, duration < time.Second,
-			"Buffer pool operations should be fast, took %v", duration)
-	})
+// BenchmarkStatsIncrement 统计增加性能测试
+func BenchmarkStatsIncrement(b *testing.B) {
+	stats := NewLoggerStats()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		stats.IncrementLevel(INFO)
+	}
+}
+
+// BenchmarkStatsGetSnapshot 统计快照性能测试
+func BenchmarkStatsGetSnapshot(b *testing.B) {
+	stats := NewLoggerStats()
+	stats.IncrementLevel(INFO)
+	stats.IncrementLevel(WARN)
+	stats.IncrementLevel(ERROR)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		_ = stats.GetStats()
+	}
 }

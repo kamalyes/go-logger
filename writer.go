@@ -20,24 +20,15 @@ import (
 	"time"
 )
 
-// WriterType 输出器类型
-type WriterType string
-
-const (
-	ConsoleWriter WriterType = "console"
-	FileWriter    WriterType = "file"
-	RotateWriter  WriterType = "rotate"
-	BufferWriter  WriterType = "buffer"
-	MultiWriter   WriterType = "multi"
-	NetworkWriter WriterType = "network"
-)
-
 // BaseWriter 基础输出器
 type BaseWriter struct {
-	Level    LogLevel `json:"level"`
-	Healthy  bool     `json:"healthy"`
-	Stats    *WriterStats `json:"-"`
-	mutex    sync.RWMutex
+	Level      LogLevel      `json:"level"`
+	Healthy    bool          `json:"healthy"`
+	Stats      *WriterStats  `json:"-"`
+	Permission os.FileMode   `json:"permission"` // 文件权限（适用于文件类输出器）
+	MaxAge     time.Duration `json:"max_age"`    // 最大保留时间（适用于轮转输出器）
+	Compress   bool          `json:"compress"`   // 是否压缩（适用于轮转输出器）
+	mutex      sync.RWMutex
 }
 
 // WriterStats 输出器统计信息
@@ -77,38 +68,64 @@ type ConsoleLogWriter struct {
 	Color  bool      `json:"color"`
 }
 
-// NewConsoleWriter 创建控制台输出器
-func NewConsoleWriter(output io.Writer) IWriter {
-	if output == nil {
-		output = os.Stdout
+// ConsoleWriterOption 控制台输出器配置选项
+type ConsoleWriterOption func(*ConsoleLogWriter)
+
+// WithConsoleOutput 设置输出目标
+func WithConsoleOutput(output io.Writer) ConsoleWriterOption {
+	return func(w *ConsoleLogWriter) {
+		w.Output = output
 	}
-	
-	return &ConsoleLogWriter{
+}
+
+// WithConsoleColor 设置是否启用颜色
+func WithConsoleColor(color bool) ConsoleWriterOption {
+	return func(w *ConsoleLogWriter) {
+		w.Color = color
+	}
+}
+
+// WithConsoleLevel 设置日志级别
+func WithConsoleLevel(level LogLevel) ConsoleWriterOption {
+	return func(w *ConsoleLogWriter) {
+		w.Level = level
+	}
+}
+
+// NewConsoleWriter 创建控制台输出器
+func NewConsoleWriter(opts ...ConsoleWriterOption) IWriter {
+	w := &ConsoleLogWriter{
 		BaseWriter: BaseWriter{
 			Level:   DEBUG,
 			Healthy: true,
 			Stats:   NewWriterStats(),
 		},
-		Output: output,
+		Output: os.Stdout,
 		Color:  true,
 	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // Write 实现io.Writer接口
 func (w *ConsoleLogWriter) Write(p []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if !w.Healthy {
 		return 0, fmt.Errorf("console writer is not healthy")
 	}
-	
+
 	n, err = w.Output.Write(p)
 	if err != nil {
 		w.Stats.AddError()
 		return n, err
 	}
-	
+
 	w.Stats.AddBytes(int64(n))
 	return n, nil
 }
@@ -133,7 +150,7 @@ func (w *ConsoleLogWriter) Flush() error {
 func (w *ConsoleLogWriter) Close() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	w.Healthy = false
 	if closer, ok := w.Output.(io.Closer); ok {
 		return closer.Close()
@@ -149,7 +166,7 @@ func (w *ConsoleLogWriter) IsHealthy() bool {
 }
 
 // GetStats 获取统计信息
-func (w *ConsoleLogWriter) GetStats() interface{} {
+func (w *ConsoleLogWriter) GetStats() any {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return *w.Stats
@@ -158,22 +175,50 @@ func (w *ConsoleLogWriter) GetStats() interface{} {
 // FileLogWriter 文件输出器
 type FileLogWriter struct {
 	BaseWriter
-	FilePath   string   `json:"file_path"`
-	file       *os.File
-	Permission os.FileMode `json:"permission"`
+	FilePath string `json:"file_path"`
+	file     *os.File
+}
+
+// FileWriterOption 文件输出器配置选项
+type FileWriterOption func(*FileLogWriter)
+
+// WithFileLevel 设置日志级别
+func WithFileLevel(level LogLevel) FileWriterOption {
+	return func(w *FileLogWriter) {
+		w.Level = level
+	}
+}
+
+// WithFileWriterPath 设置文件路径
+func WithFileWriterPath(filePath string) FileWriterOption {
+	return func(w *FileLogWriter) {
+		w.FilePath = filePath
+	}
+}
+
+// WithFilePermission 设置文件权限
+func WithFilePermission(permission os.FileMode) FileWriterOption {
+	return func(w *FileLogWriter) {
+		w.Permission = permission
+	}
 }
 
 // NewFileWriter 创建文件输出器
-func NewFileWriter(filePath string) IWriter {
-	return &FileLogWriter{
+func NewFileWriter(opts ...FileWriterOption) IWriter {
+	w := &FileLogWriter{
 		BaseWriter: BaseWriter{
-			Level:   DEBUG,
-			Healthy: false, // 需要先打开文件
-			Stats:   NewWriterStats(),
+			Level:      DEBUG,
+			Healthy:    false, // 需要先打开文件
+			Stats:      NewWriterStats(),
+			Permission: DefaultFilePermission,
 		},
-		FilePath:   filePath,
-		Permission: 0644,
 	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // ensureFile 确保文件已打开
@@ -181,19 +226,19 @@ func (w *FileLogWriter) ensureFile() error {
 	if w.file != nil {
 		return nil
 	}
-	
+
 	// 创建目录
 	dir := filepath.Dir(w.FilePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, DefaultDirPermission); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	
+
 	// 打开文件
 	file, err := os.OpenFile(w.FilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, w.Permission)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	
+
 	w.file = file
 	w.Healthy = true
 	return nil
@@ -203,19 +248,19 @@ func (w *FileLogWriter) ensureFile() error {
 func (w *FileLogWriter) Write(p []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if err := w.ensureFile(); err != nil {
 		w.Stats.AddError()
 		return 0, err
 	}
-	
+
 	n, err = w.file.Write(p)
 	if err != nil {
 		w.Stats.AddError()
 		w.Healthy = false
 		return n, err
 	}
-	
+
 	w.Stats.AddBytes(int64(n))
 	return n, nil
 }
@@ -232,7 +277,7 @@ func (w *FileLogWriter) WriteLevel(level LogLevel, data []byte) (n int, err erro
 func (w *FileLogWriter) Flush() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if w.file != nil {
 		return w.file.Sync()
 	}
@@ -243,7 +288,7 @@ func (w *FileLogWriter) Flush() error {
 func (w *FileLogWriter) Close() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	w.Healthy = false
 	if w.file != nil {
 		err := w.file.Close()
@@ -261,7 +306,7 @@ func (w *FileLogWriter) IsHealthy() bool {
 }
 
 // GetStats 获取统计信息
-func (w *FileLogWriter) GetStats() interface{} {
+func (w *FileLogWriter) GetStats() any {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return *w.Stats
@@ -270,29 +315,85 @@ func (w *FileLogWriter) GetStats() interface{} {
 // RotateLogWriter 轮转文件输出器
 type RotateLogWriter struct {
 	BaseWriter
-	FilePath    string      `json:"file_path"`
-	MaxSize     int64       `json:"max_size"`     // 字节
-	MaxFiles    int         `json:"max_files"`
-	MaxAge      time.Duration `json:"max_age"`
-	Compress    bool        `json:"compress"`
+	FilePath    string `json:"file_path"`
+	MaxSize     int64  `json:"max_size"`  // 字节
+	MaxFiles    int    `json:"max_files"` // 最大文件数
 	currentFile *os.File
 	currentSize int64
 }
 
-// NewRotateWriter 创建轮转文件输出器
-func NewRotateWriter(filePath string, maxSize int64, maxFiles int) IWriter {
-	return &RotateLogWriter{
-		BaseWriter: BaseWriter{
-			Level:   DEBUG,
-			Healthy: false,
-			Stats:   NewWriterStats(),
-		},
-		FilePath: filePath,
-		MaxSize:  maxSize,
-		MaxFiles: maxFiles,
-		MaxAge:   30 * 24 * time.Hour, // 默认30天
-		Compress: false,
+// RotateWriterOption 轮转文件输出器配置选项
+type RotateWriterOption func(*RotateLogWriter)
+
+// WithRotateLevel 设置日志级别
+func WithRotateLevel(level LogLevel) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.Level = level
 	}
+}
+
+// WithFilePath 设置文件路径
+func WithFilePath(filePath string) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.FilePath = filePath
+	}
+}
+
+// WithMaxSize 设置最大文件大小（字节）
+func WithMaxSize(maxSize int64) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.MaxSize = maxSize
+	}
+}
+
+// WithMaxFiles 设置最大文件数
+func WithMaxFiles(maxFiles int) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.MaxFiles = maxFiles
+	}
+}
+
+// WithMaxAge 设置最大保留时间
+func WithMaxAge(maxAge time.Duration) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.MaxAge = maxAge
+	}
+}
+
+// WithCompress 设置是否压缩旧文件
+func WithCompress(compress bool) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.Compress = compress
+	}
+}
+
+// WithRotatePermission 设置文件权限
+func WithRotatePermission(permission os.FileMode) RotateWriterOption {
+	return func(w *RotateLogWriter) {
+		w.Permission = permission
+	}
+}
+
+// NewRotateWriter 创建轮转文件输出器
+func NewRotateWriter(opts ...RotateWriterOption) IWriter {
+	w := &RotateLogWriter{
+		BaseWriter: BaseWriter{
+			Level:      DEBUG,
+			Healthy:    false,
+			Stats:      NewWriterStats(),
+			Permission: DefaultFilePermission,
+			MaxAge:     DefaultMaxAge,
+			Compress:   false,
+		},
+		MaxSize:  DefaultMaxSize,
+		MaxFiles: DefaultMaxFiles,
+	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // shouldRotate 检查是否需要轮转
@@ -307,25 +408,25 @@ func (w *RotateLogWriter) rotate() error {
 		w.currentFile.Close()
 		w.currentFile = nil
 	}
-	
+
 	// 重命名现有文件
 	for i := w.MaxFiles - 1; i > 0; i-- {
 		oldPath := fmt.Sprintf("%s.%d", w.FilePath, i)
 		newPath := fmt.Sprintf("%s.%d", w.FilePath, i+1)
-		
+
 		if _, err := os.Stat(oldPath); err == nil {
 			os.Rename(oldPath, newPath)
 		}
 	}
-	
+
 	// 移动当前文件
 	if _, err := os.Stat(w.FilePath); err == nil {
 		os.Rename(w.FilePath, w.FilePath+".1")
 	}
-	
+
 	// 重置大小
 	w.currentSize = 0
-	
+
 	return w.ensureFile()
 }
 
@@ -334,22 +435,22 @@ func (w *RotateLogWriter) ensureFile() error {
 	if w.currentFile != nil {
 		return nil
 	}
-	
+
 	dir := filepath.Dir(w.FilePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	
-	file, err := os.OpenFile(w.FilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+
+	file, err := os.OpenFile(w.FilePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, w.Permission)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	
+
 	// 获取当前文件大小
 	if stat, err := file.Stat(); err == nil {
 		w.currentSize = stat.Size()
 	}
-	
+
 	w.currentFile = file
 	w.Healthy = true
 	return nil
@@ -359,7 +460,7 @@ func (w *RotateLogWriter) ensureFile() error {
 func (w *RotateLogWriter) Write(p []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	// 检查是否需要轮转
 	if w.shouldRotate(len(p)) {
 		if err := w.rotate(); err != nil {
@@ -367,19 +468,19 @@ func (w *RotateLogWriter) Write(p []byte) (n int, err error) {
 			return 0, err
 		}
 	}
-	
+
 	if err := w.ensureFile(); err != nil {
 		w.Stats.AddError()
 		return 0, err
 	}
-	
+
 	n, err = w.currentFile.Write(p)
 	if err != nil {
 		w.Stats.AddError()
 		w.Healthy = false
 		return n, err
 	}
-	
+
 	w.currentSize += int64(n)
 	w.Stats.AddBytes(int64(n))
 	return n, nil
@@ -397,7 +498,7 @@ func (w *RotateLogWriter) WriteLevel(level LogLevel, data []byte) (n int, err er
 func (w *RotateLogWriter) Flush() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if w.currentFile != nil {
 		return w.currentFile.Sync()
 	}
@@ -408,7 +509,7 @@ func (w *RotateLogWriter) Flush() error {
 func (w *RotateLogWriter) Close() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	w.Healthy = false
 	if w.currentFile != nil {
 		err := w.currentFile.Close()
@@ -426,7 +527,7 @@ func (w *RotateLogWriter) IsHealthy() bool {
 }
 
 // GetStats 获取统计信息
-func (w *RotateLogWriter) GetStats() interface{} {
+func (w *RotateLogWriter) GetStats() any {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return *w.Stats
@@ -440,36 +541,68 @@ type BufferedWriter struct {
 	bufferSize int
 }
 
+// BufferedWriterOption 缓冲输出器配置选项
+type BufferedWriterOption func(*BufferedWriter)
+
+// WithBufferedUnderlying 设置底层输出器
+func WithBufferedUnderlying(underlying IWriter) BufferedWriterOption {
+	return func(w *BufferedWriter) {
+		w.underlying = underlying
+		w.buffer = bufio.NewWriterSize(underlying, w.bufferSize)
+	}
+}
+
+// WithBufferSize 设置缓冲区大小
+func WithBufferSize(bufferSize int) BufferedWriterOption {
+	return func(w *BufferedWriter) {
+		w.bufferSize = bufferSize
+		if w.underlying != nil {
+			w.buffer = bufio.NewWriterSize(w.underlying, bufferSize)
+		}
+	}
+}
+
+// WithBufferedLevel 设置日志级别
+func WithBufferedLevel(level LogLevel) BufferedWriterOption {
+	return func(w *BufferedWriter) {
+		w.Level = level
+	}
+}
+
 // NewBufferedWriter 创建缓冲输出器
-func NewBufferedWriter(underlying IWriter, bufferSize int) IWriter {
-	return &BufferedWriter{
+func NewBufferedWriter(opts ...BufferedWriterOption) IWriter {
+	w := &BufferedWriter{
 		BaseWriter: BaseWriter{
 			Level:   DEBUG,
 			Healthy: true,
 			Stats:   NewWriterStats(),
 		},
-		underlying: underlying,
-		buffer:     bufio.NewWriterSize(underlying, bufferSize),
-		bufferSize: bufferSize,
+		bufferSize: DefaultBufferSize,
 	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // Write 实现io.Writer接口
 func (w *BufferedWriter) Write(p []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if !w.Healthy {
 		return 0, fmt.Errorf("buffered writer is not healthy")
 	}
-	
+
 	n, err = w.buffer.Write(p)
 	if err != nil {
 		w.Stats.AddError()
 		w.Healthy = false
 		return n, err
 	}
-	
+
 	w.Stats.AddBytes(int64(n))
 	return n, nil
 }
@@ -486,7 +619,7 @@ func (w *BufferedWriter) WriteLevel(level LogLevel, data []byte) (n int, err err
 func (w *BufferedWriter) Flush() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	if w.buffer != nil {
 		return w.buffer.Flush()
 	}
@@ -497,7 +630,7 @@ func (w *BufferedWriter) Flush() error {
 func (w *BufferedWriter) Close() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	w.Healthy = false
 	if w.buffer != nil {
 		w.buffer.Flush()
@@ -516,7 +649,7 @@ func (w *BufferedWriter) IsHealthy() bool {
 }
 
 // GetStats 获取统计信息
-func (w *BufferedWriter) GetStats() interface{} {
+func (w *BufferedWriter) GetStats() any {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return *w.Stats
@@ -528,39 +661,62 @@ type MultiLogWriter struct {
 	writers []IWriter
 }
 
+// MultiWriterOption 多输出器配置选项
+type MultiWriterOption func(*MultiLogWriter)
+
+// WithWriters 设置输出器列表
+func WithWriters(writers ...IWriter) MultiWriterOption {
+	return func(w *MultiLogWriter) {
+		w.writers = writers
+	}
+}
+
+// WithMultiLevel 设置日志级别
+func WithMultiLevel(level LogLevel) MultiWriterOption {
+	return func(w *MultiLogWriter) {
+		w.Level = level
+	}
+}
+
 // NewMultiWriter 创建多输出器
-func NewMultiWriter(writers ...IWriter) IWriter {
-	return &MultiLogWriter{
+func NewMultiWriter(opts ...MultiWriterOption) IWriter {
+	w := &MultiLogWriter{
 		BaseWriter: BaseWriter{
 			Level:   DEBUG,
 			Healthy: true,
 			Stats:   NewWriterStats(),
 		},
-		writers: writers,
+		writers: []IWriter{},
 	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	return w
 }
 
 // Write 实现io.Writer接口
 func (w *MultiLogWriter) Write(p []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	var lastErr error
 	for _, writer := range w.writers {
 		if !writer.IsHealthy() {
 			continue
 		}
-		
+
 		if _, werr := writer.Write(p); werr != nil {
 			lastErr = werr
 			w.Stats.AddError()
 		}
 	}
-	
+
 	if lastErr != nil {
 		return 0, lastErr
 	}
-	
+
 	w.Stats.AddBytes(int64(len(p)))
 	return len(p), nil
 }
@@ -588,7 +744,7 @@ func (w *MultiLogWriter) Flush() error {
 func (w *MultiLogWriter) Close() error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
-	
+
 	w.Healthy = false
 	var lastErr error
 	for _, writer := range w.writers {
@@ -603,11 +759,11 @@ func (w *MultiLogWriter) Close() error {
 func (w *MultiLogWriter) IsHealthy() bool {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
-	
+
 	if !w.Healthy {
 		return false
 	}
-	
+
 	for _, writer := range w.writers {
 		if writer.IsHealthy() {
 			return true
@@ -617,7 +773,7 @@ func (w *MultiLogWriter) IsHealthy() bool {
 }
 
 // GetStats 获取统计信息
-func (w *MultiLogWriter) GetStats() interface{} {
+func (w *MultiLogWriter) GetStats() any {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 	return *w.Stats
