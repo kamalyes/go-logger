@@ -11,6 +11,7 @@
 package logger
 
 import (
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -100,7 +101,7 @@ func createConsoleWriter(config *WriterConfig) IWriter {
 // createFileWriter 创建文件 Writer
 func createFileWriter(config *WriterConfig) (IWriter, error) {
 	if config.FilePath == "" {
-		return nil, NewConfigError(ErrInvalidInput, ErrMsgFilePathEmpty)
+		return nil, errors.New(ErrMsgFilePathEmpty)
 	}
 
 	opts := []FileWriterOption{
@@ -121,7 +122,7 @@ func createFileWriter(config *WriterConfig) (IWriter, error) {
 // createRotateWriter 创建轮转文件 Writer
 func createRotateWriter(config *WriterConfig) (IWriter, error) {
 	if config.FilePath == "" {
-		return nil, NewConfigError(ErrInvalidInput, ErrMsgRotatePathEmpty)
+		return nil, errors.New(ErrMsgRotatePathEmpty)
 	}
 
 	maxSize := mathx.IfNotZero(config.MaxSize, DefaultMaxSize)

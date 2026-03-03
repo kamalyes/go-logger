@@ -106,7 +106,6 @@ go-logger/
 ├── timer.go             # 计时器实现
 ├── writer.go            # 写入器实现
 ├── output.go            # 输出管理
-├── errors.go            # 错误定义
 ├── empty.go             # 空实现（用于禁用日志）
 └── *_test.go            # 测试文件
 ```
