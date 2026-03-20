@@ -214,9 +214,9 @@ func (s *TypesTestSuite) TestLoggerWithContextExtractor() {
 	logger.WithContextExtractor(customExtractor)
 	assert.NotNil(s.T(), logger.contextExtractor)
 
-	// 测试设置nil提取器（应该使用默认）
+	// 测试设置 nil 提取器（恢复为按 contextKeys 默认提取）
 	logger.WithContextExtractor(nil)
-	assert.NotNil(s.T(), logger.contextExtractor)
+	assert.Nil(s.T(), logger.contextExtractor)
 }
 
 // TestLoggerWithWriters 测试设置写入器列表
@@ -375,7 +375,7 @@ func (s *TypesTestSuite) TestLoggerGetContextExtractor() {
 	logger := NewLogger()
 
 	extractor := logger.GetContextExtractor()
-	assert.NotNil(s.T(), extractor)
+	assert.Nil(s.T(), extractor)
 }
 
 // 运行测试套件

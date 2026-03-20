@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kamalyes/go-toolbox/pkg/contextx"
 	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
@@ -134,14 +135,11 @@ func (s *LoggerTestSuite) TestWithError() {
 func (s *LoggerTestSuite) TestContextLogging() {
 	ctx := context.Background()
 	traceID := random.UUID()
-	requestID := random.UUID()
-	ctx = WithTraceID(ctx, traceID)
-	ctx = WithRequestID(ctx, requestID)
+	ctx = contextx.WithValue(ctx, ContextKeyTraceID, traceID)
 
 	s.logger.InfoContext(ctx, "processing request")
 	output := s.buffer.String()
 	assert.Contains(s.T(), output, traceID)
-	assert.Contains(s.T(), output, requestID)
 	assert.Contains(s.T(), output, "processing request")
 }
 
@@ -158,7 +156,7 @@ func (s *LoggerTestSuite) TestKVLogging() {
 // TestContextKVLogging 测试带上下文的键值对日志
 func (s *LoggerTestSuite) TestContextKVLogging() {
 	traceID := random.UUID()
-	ctx := WithTraceID(context.Background(), traceID)
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	s.logger.InfoContextKV(ctx, "operation", "key", "value")
 	output := s.buffer.String()
 	assert.Contains(s.T(), output, traceID)
@@ -196,7 +194,7 @@ func (s *LoggerTestSuite) TestReturnMethods() {
 // TestContextReturnMethods 测试带上下文返回错误的方法
 func (s *LoggerTestSuite) TestContextReturnMethods() {
 	traceID := random.UUID()
-	ctx := WithTraceID(context.Background(), traceID)
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	err := s.logger.ErrorCtxReturn(ctx, "context error: %s", "failed")
 	assert.NotNil(s.T(), err)
 	assert.Contains(s.T(), err.Error(), "context error")
@@ -244,7 +242,7 @@ func (s *LoggerTestSuite) TestClone() {
 // TestWithContext 测试带上下文的日志器
 func (s *LoggerTestSuite) TestWithContext() {
 	traceID := random.UUID()
-	ctx := WithTraceID(context.Background(), traceID)
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	ctxLogger := s.logger.WithContext(ctx)
 	assert.NotNil(s.T(), ctxLogger)
 }
@@ -462,8 +460,7 @@ func BenchmarkLoggerContext(b *testing.B) {
 		WithLevel(INFO)
 
 	ctx := context.Background()
-	ctx = WithTraceID(ctx, random.UUID())
-	ctx = WithRequestID(ctx, random.UUID())
+	ctx = contextx.WithValue(ctx, ContextKeyTraceID, random.UUID())
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -545,6 +542,46 @@ func TestCustomContextExtractor(t *testing.T) {
 	output := buffer.String()
 	assert.Contains(t, output, "Custom:test-value")
 	assert.Contains(t, output, "test message")
+}
+
+func TestLoggerWithContextKeys(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	logger := NewLogger().
+		WithOutput(buffer).
+		WithColorful(false).
+		WithContextKeys(ContextKeyTraceID, "biz_id")
+
+	ctx := context.Background()
+	ctx = contextx.WithValue(ctx, ContextKeyTraceID, "trace-123")
+	ctx = contextx.WithValue(ctx, "biz_id", "biz-456")
+
+	logger.InfoContext(ctx, "custom context")
+
+	output := buffer.String()
+	assert.Contains(t, output, "trace_id=trace-123")
+	assert.Contains(t, output, "biz_id=biz-456")
+	assert.Contains(t, output, "custom context")
+}
+
+func TestLoggerWithContextKeysResetsCustomExtractor(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	logger := NewLogger().
+		WithOutput(buffer).
+		WithColorful(false)
+
+	logger.WithContextExtractor(func(ctx context.Context) string {
+		return "[custom] "
+	})
+
+	logger.WithContextKeys(ContextKeyTraceID)
+
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, "trace-123")
+	logger.InfoContext(ctx, "context by keys")
+
+	output := buffer.String()
+	assert.Contains(t, output, "trace_id=trace-123")
+	assert.Contains(t, output, "context by keys")
+	assert.NotContains(t, output, "[custom]")
 }
 
 // TestLoggerBuilder 测试构建器模式

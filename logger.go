@@ -21,7 +21,6 @@ import (
 
 	"github.com/kamalyes/go-toolbox/pkg/convert"
 	"github.com/kamalyes/go-toolbox/pkg/mathx"
-	"google.golang.org/grpc/metadata"
 )
 
 // ============================================================================
@@ -30,11 +29,7 @@ import (
 
 const (
 	maxLogMessageSize    = 1024 // 单条日志消息的最大预分配大小
-	estimatedContextSize = 100  // 预估的上下文信息大小（TraceID/RequestID 等）
-
-	// Metadata keys - 用于从 gRPC metadata 获取
-	MetadataKeyTraceID   = "x-trace-id"
-	MetadataKeyRequestID = "x-request-id"
+	estimatedContextSize = 100  // 预估的上下文信息大小（TraceID 等）
 )
 
 // 字节池 - 用于日志消息构建
@@ -74,12 +69,6 @@ var (
 
 	newline = []byte("\n")
 
-	// context 提取的常量前缀（优化字符串拼接）
-	traceIDPrefix   = []byte("TraceID=")
-	requestIDPrefix = []byte(" RequestID=")
-	bracketOpen     = []byte("[")
-	bracketClose    = []byte("] ")
-
 	// 键值对日志的常量字符串
 	kvSeparator  = []byte(": ")
 	kvDelimiter  = []byte(", ")
@@ -112,61 +101,6 @@ var (
 
 // ContextExtractor 上下文信息提取器函数类型
 type ContextExtractor func(ctx context.Context) string
-
-// defaultContextExtractor 默认的上下文信息提取器
-// 从 context.Context 中提取 TraceID 和 RequestID
-func defaultContextExtractor(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-
-	var traceID, requestID string
-
-	// 1. 尝试从 context.Value 获取
-	if tid, ok := ctx.Value(KeyTraceID).(string); ok && tid != "" {
-		traceID = tid
-	}
-	if rid, ok := ctx.Value(KeyRequestID).(string); ok && rid != "" {
-		requestID = rid
-	}
-
-	// 2. 如果还没找到，尝试从 gRPC metadata 获取
-	if traceID == "" || requestID == "" {
-		if md, ok := metadata.FromIncomingContext(ctx); ok {
-			if traceID == "" {
-				if values := md.Get(MetadataKeyTraceID); len(values) > 0 {
-					traceID = values[0]
-				}
-			}
-			if requestID == "" {
-				if values := md.Get(MetadataKeyRequestID); len(values) > 0 {
-					requestID = values[0]
-				}
-			}
-		}
-	}
-
-	// 3. 构建前缀（使用专用的上下文池和预分配的常量）
-	if traceID != "" || requestID != "" {
-		buf := contextPool.Get().([]byte)
-		buf = buf[:0]
-		defer contextPool.Put(buf)
-
-		buf = append(buf, bracketOpen...)
-		if traceID != "" {
-			buf = append(buf, traceIDPrefix...)
-			buf = append(buf, convert.S2B(traceID)...)
-		}
-		if requestID != "" {
-			buf = append(buf, requestIDPrefix...)
-			buf = append(buf, convert.S2B(requestID)...)
-		}
-		buf = append(buf, bracketClose...)
-		return string(buf)
-	}
-
-	return ""
-}
 
 // ============================================================================
 // Logger 结构体和初始化
@@ -433,18 +367,11 @@ func (l *Logger) DebugLines(lines ...string) {
 
 // SetContextExtractor 设置自定义上下文提取器
 func (l *Logger) SetContextExtractor(extractor ContextExtractor) {
-	if extractor == nil {
-		l.contextExtractor = defaultContextExtractor
-	} else {
-		l.contextExtractor = extractor
-	}
+	l.contextExtractor = extractor
 }
 
 // GetContextExtractor 获取当前的上下文提取器
 func (l *Logger) GetContextExtractor() ContextExtractor {
-	if l.contextExtractor == nil {
-		return defaultContextExtractor
-	}
 	return l.contextExtractor
 }
 
@@ -453,10 +380,10 @@ func (l *Logger) extractContextInfo(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	if l.contextExtractor == nil {
-		return defaultContextExtractor(ctx)
+	if l.contextExtractor != nil {
+		return l.contextExtractor(ctx)
 	}
-	return l.contextExtractor(ctx)
+	return extractContextWithCompiledKeys(ctx, l.contextKeys)
 }
 
 // 带上下文的日志方法

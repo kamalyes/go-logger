@@ -75,7 +75,8 @@ type Logger struct {
 	// 上下文支持
 	context          context.Context
 	cancel           context.CancelFunc
-	contextExtractor ContextExtractor // 自定义上下文提取器
+	contextKeys      []compiledContextKey
+	contextExtractor ContextExtractor
 
 	// 统计信息
 	stats *LoggerStats
@@ -163,28 +164,28 @@ func (s *LoggerStats) GetStats() *LoggerStats {
 // NewLogger 创建新的日志记录器（默认配置）
 func NewLogger() *Logger {
 	return &Logger{
-		level:            DEBUG,
-		showCaller:       false,
-		colorful:         true,
-		prefix:           "",
-		timeFormat:       time.DateTime,
-		format:           FormatJSON,
-		callerDepth:      2,
-		showStacktrace:   false,
-		timestampKey:     "timestamp",
-		levelKey:         "level",
-		messageKey:       "message",
-		callerKey:        "caller",
-		stacktraceKey:    "stacktrace",
-		asyncWrite:       false,
-		bufferSize:       0,
-		batchSize:        100,
-		batchTimeout:     100 * time.Millisecond,
-		output:           os.Stdout,
-		logger:           log.New(os.Stdout, "", log.LstdFlags),
-		contextExtractor: defaultContextExtractor,
-		stats:            NewLoggerStats(),
-		mu:               sync.Mutex{},
+		level:          DEBUG,
+		showCaller:     false,
+		colorful:       true,
+		prefix:         "",
+		timeFormat:     time.DateTime,
+		format:         FormatJSON,
+		callerDepth:    2,
+		showStacktrace: false,
+		timestampKey:   "timestamp",
+		levelKey:       "level",
+		messageKey:     "message",
+		callerKey:      "caller",
+		stacktraceKey:  "stacktrace",
+		asyncWrite:     false,
+		bufferSize:     0,
+		batchSize:      100,
+		batchTimeout:   100 * time.Millisecond,
+		output:         os.Stdout,
+		logger:         log.New(os.Stdout, "", log.LstdFlags),
+		contextKeys:    append([]compiledContextKey(nil), defaultCompiledContextKeys...),
+		stats:          NewLoggerStats(),
+		mu:             sync.Mutex{},
 	}
 }
 
@@ -331,11 +332,7 @@ func (l *Logger) WithMiddleware(middleware []IMiddleware) *Logger {
 
 // WithContextExtractor 设置上下文提取器
 func (l *Logger) WithContextExtractor(extractor ContextExtractor) *Logger {
-	if extractor == nil {
-		l.contextExtractor = defaultContextExtractor
-	} else {
-		l.contextExtractor = extractor
-	}
+	l.contextExtractor = extractor
 	return l
 }
 
@@ -378,11 +375,12 @@ func (l *Logger) Clone() ILogger {
 		newLogger.logger = l.logger
 		newLogger.formatter = l.formatter
 		newLogger.writers = l.writers
-		newLogger.contextExtractor = l.contextExtractor
+		newLogger.contextKeys = append([]compiledContextKey(nil), l.contextKeys...)
 	}
 
 	// 确保使用新的统计信息
 	newLogger.stats = NewLoggerStats()
+	newLogger.contextExtractor = l.contextExtractor
 
 	return newLogger
 }

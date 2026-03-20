@@ -15,6 +15,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kamalyes/go-toolbox/pkg/contextx"
 	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
@@ -130,7 +131,7 @@ func (s *ConsoleTestSuite) TestCollapsedGroupFiltering() {
 // TestGroupWithContext 测试带上下文的分组日志
 func (s *ConsoleTestSuite) TestGroupWithContext() {
 	traceID := random.UUID()
-	ctx := WithTraceID(context.Background(), traceID)
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	cg := s.logger.NewConsoleGroup()
 	cg.Group("Context Group")
 	s.buffer.Reset()
