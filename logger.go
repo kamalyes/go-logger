@@ -21,6 +21,7 @@ import (
 
 	"github.com/kamalyes/go-toolbox/pkg/convert"
 	"github.com/kamalyes/go-toolbox/pkg/mathx"
+	"github.com/kamalyes/go-toolbox/pkg/stringx"
 )
 
 // ============================================================================
@@ -129,7 +130,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	defer bytePool.Put(buf)
 
 	// 添加时间戳
-	buf = convert.FastFormatTime(buf, time.Now())
+	buf = stringx.FastFormatTime(buf, time.Now())
 
 	// 添加前缀（如果有）
 	if l.prefix != "" {
@@ -153,7 +154,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 			buf = append(buf, '[')
 			buf = append(buf, convert.S2B(file)...)
 			buf = append(buf, ':')
-			buf = convert.FastAppendInt(buf, line)
+			buf = stringx.FastAppendInt(buf, line)
 			buf = append(buf, ':')
 			buf = append(buf, convert.S2B(funcName)...)
 			buf = append(buf, ']', ' ')
