@@ -3,7 +3,7 @@ module github.com/kamalyes/go-logger
 go 1.24.0
 
 require (
-	github.com/kamalyes/go-toolbox v0.15.1
+	github.com/kamalyes/go-toolbox v0.12.1
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
