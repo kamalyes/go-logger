@@ -558,8 +558,9 @@ func TestLoggerWithContextKeys(t *testing.T) {
 	logger.InfoContext(ctx, "custom context")
 
 	output := buffer.String()
-	assert.Contains(t, output, "trace_id=trace-123")
-	assert.Contains(t, output, "biz_id=biz-456")
+	// JSON 模式下 traceId 等作为 JSON 顶层字段输出
+	assert.Contains(t, output, `"trace_id":"trace-123"`)
+	assert.Contains(t, output, `"biz_id":"biz-456"`)
 	assert.Contains(t, output, "custom context")
 }
 
@@ -579,7 +580,7 @@ func TestLoggerWithContextKeysResetsCustomExtractor(t *testing.T) {
 	logger.InfoContext(ctx, "context by keys")
 
 	output := buffer.String()
-	assert.Contains(t, output, "trace_id=trace-123")
+	assert.Contains(t, output, `"trace_id":"trace-123"`)
 	assert.Contains(t, output, "context by keys")
 	assert.NotContains(t, output, "[custom]")
 }

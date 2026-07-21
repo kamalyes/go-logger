@@ -42,7 +42,7 @@ func (s *TimerTestSuite) TearDownTest() {
 
 // TestNewTimer 测试创建计时器
 func (s *TimerTestSuite) TestNewTimer() {
-	timer := NewTimer(s.logger, "test", 0)
+	timer := NewTimer(s.buffer, "test", 0)
 	assert.NotNil(s.T(), timer)
 	assert.Equal(s.T(), "test", timer.label)
 	assert.Equal(s.T(), 0, timer.indentLevel)
@@ -64,7 +64,7 @@ func (s *TimerTestSuite) TestConsoleTime() {
 
 // TestTimerEnd 测试结束计时
 func (s *TimerTestSuite) TestTimerEnd() {
-	timer := NewTimer(s.logger, "test", 0)
+	timer := NewTimer(s.buffer, "test", 0)
 	s.buffer.Reset()
 
 	time.Sleep(10 * time.Millisecond)
@@ -77,7 +77,7 @@ func (s *TimerTestSuite) TestTimerEnd() {
 
 // TestTimerLog 测试计时日志
 func (s *TimerTestSuite) TestTimerLog() {
-	timer := NewTimer(s.logger, "test", 0)
+	timer := NewTimer(s.buffer, "test", 0)
 	s.buffer.Reset()
 
 	time.Sleep(5 * time.Millisecond)
@@ -91,7 +91,7 @@ func (s *TimerTestSuite) TestTimerLog() {
 
 // TestTimerElapsed 测试获取已过时间
 func (s *TimerTestSuite) TestTimerElapsed() {
-	timer := NewTimer(s.logger, "test", 0)
+	timer := NewTimer(s.buffer, "test", 0)
 
 	time.Sleep(10 * time.Millisecond)
 	elapsed := timer.Elapsed()
@@ -101,7 +101,7 @@ func (s *TimerTestSuite) TestTimerElapsed() {
 
 // TestTimerWithIndent 测试带缩进的计时器
 func (s *TimerTestSuite) TestTimerWithIndent() {
-	timer := NewTimer(s.logger, "indented", 2)
+	timer := NewTimer(s.buffer, "indented", 2)
 	s.buffer.Reset()
 
 	timer.End()
@@ -134,8 +134,8 @@ func (s *TimerTestSuite) TestFormatDuration() {
 
 // TestMultipleTimers 测试多个计时器
 func (s *TimerTestSuite) TestMultipleTimers() {
-	timer1 := NewTimer(s.logger, "timer1", 0)
-	timer2 := NewTimer(s.logger, "timer2", 0)
+	timer1 := NewTimer(s.buffer, "timer1", 0)
+	timer2 := NewTimer(s.buffer, "timer2", 0)
 
 	time.Sleep(5 * time.Millisecond)
 
@@ -174,8 +174,8 @@ func (s *TimerTestSuite) TestGetActiveTimersCount() {
 
 	initialCount := GetActiveTimersCount()
 
-	timer1 := NewTimer(s.logger, "timer1", 0)
-	timer2 := NewTimer(s.logger, "timer2", 0)
+	timer1 := NewTimer(s.buffer, "timer1", 0)
+	timer2 := NewTimer(s.buffer, "timer2", 0)
 
 	count := GetActiveTimersCount()
 	assert.Equal(s.T(), initialCount+2, count)
@@ -196,7 +196,7 @@ func (s *TimerTestSuite) TestCleanupExpiredTimers() {
 	time.Sleep(10 * time.Millisecond) // 确保清理完成
 
 	// 创建一个新计时器
-	timer := NewTimer(s.logger, "test-cleanup", 0)
+	timer := NewTimer(s.buffer, "test-cleanup", 0)
 	time.Sleep(10 * time.Millisecond) // 确保计时器被存储
 
 	// 验证计时器被创建
@@ -228,7 +228,7 @@ func (s *TimerTestSuite) TestTimerConfiguration() {
 
 // TestTimerLogWithoutMessage 测试无消息的计时日志
 func (s *TimerTestSuite) TestTimerLogWithoutMessage() {
-	timer := NewTimer(s.logger, "test", 0)
+	timer := NewTimer(s.buffer, "test", 0)
 	s.buffer.Reset()
 
 	time.Sleep(5 * time.Millisecond)
@@ -257,18 +257,18 @@ func (s *TimerTestSuite) TestTimerInGroup() {
 
 // TestTimerReuse 测试计时器标签复用
 func (s *TimerTestSuite) TestTimerReuse() {
-	timer1 := NewTimer(s.logger, "same-label", 0)
+	timer1 := NewTimer(s.buffer, "same-label", 0)
 	timer1.End()
 
 	// 使用相同标签创建新计时器
-	timer2 := NewTimer(s.logger, "same-label", 0)
+	timer2 := NewTimer(s.buffer, "same-label", 0)
 	assert.NotNil(s.T(), timer2)
 	timer2.End()
 }
 
 // TestTimerPrecision 测试计时精度
 func (s *TimerTestSuite) TestTimerPrecision() {
-	timer := NewTimer(s.logger, "precision", 0)
+	timer := NewTimer(s.buffer, "precision", 0)
 
 	// 等待一个精确的时间
 	time.Sleep(100 * time.Millisecond)
@@ -281,7 +281,7 @@ func (s *TimerTestSuite) TestTimerPrecision() {
 
 // TestTimerMultipleLogs 测试多次日志记录
 func (s *TimerTestSuite) TestTimerMultipleLogs() {
-	timer := NewTimer(s.logger, "multi-log", 0)
+	timer := NewTimer(s.buffer, "multi-log", 0)
 	s.buffer.Reset()
 
 	time.Sleep(5 * time.Millisecond)
@@ -300,7 +300,7 @@ func (s *TimerTestSuite) TestTimerMultipleLogs() {
 
 // TestTimerZeroDuration 测试零时长
 func (s *TimerTestSuite) TestTimerZeroDuration() {
-	timer := NewTimer(s.logger, "zero", 0)
+	timer := NewTimer(s.buffer, "zero", 0)
 	s.buffer.Reset()
 
 	// 立即结束

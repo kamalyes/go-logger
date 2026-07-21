@@ -13,6 +13,8 @@ package logger
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -21,8 +23,10 @@ import (
 )
 
 // ConsoleGroup 控制台分组
+// 所有输出直接写入 output（默认 os.Stdout），不走 logger 的 JSON/文本格式化
+// 这样启动横幅、表格等控制台展示内容不会污染 JSON 日志流
 type ConsoleGroup struct {
-	logger          ILogger
+	output          io.Writer
 	indentLevel     int
 	mutex           sync.Mutex
 	collapsed       bool
@@ -36,13 +40,29 @@ type ConsoleTable struct {
 }
 
 // NewConsoleGroup 创建新的控制台分组
+// 继承 logger 的 output（可能是 buffer/stdout/文件），但不走 logger 格式化
 func (l *Logger) NewConsoleGroup() *ConsoleGroup {
 	return &ConsoleGroup{
-		logger:          l,
+		output:          l.output,
 		indentLevel:     0,
 		collapsed:       false,
 		collapsedLevels: make([]bool, 0, 16), // 预分配 16 层嵌套容量，减少扩容
 	}
+}
+
+// NewConsoleGroup 创建新的控制台分组（包级函数，输出到 os.Stdout）
+func NewConsoleGroup() *ConsoleGroup {
+	return &ConsoleGroup{
+		output:          os.Stdout,
+		indentLevel:     0,
+		collapsed:       false,
+		collapsedLevels: make([]bool, 0, 16),
+	}
+}
+
+// writeln 向 output 写入一行（所有控制台展示输出的统一出口）
+func (cg *ConsoleGroup) writeln(msg string) {
+	fmt.Fprintln(cg.output, msg)
 }
 
 // Group 开始一个新的日志分组
@@ -54,7 +74,7 @@ func (cg *ConsoleGroup) Group(label string, args ...interface{}) {
 	indent := cg.getIndent()
 	msg := fmt.Sprintf(label, args...)
 
-	cg.logger.InfoMsg(fmt.Sprintf("%s▼ %s", indent, msg))
+	cg.writeln(fmt.Sprintf("%s▼ %s", indent, msg))
 	cg.collapsedLevels = append(cg.collapsedLevels, false)
 	cg.indentLevel++
 }
@@ -69,7 +89,7 @@ func (cg *ConsoleGroup) GroupCollapsed(label string, args ...interface{}) {
 	indent := cg.getIndent()
 	msg := fmt.Sprintf(label, args...)
 
-	cg.logger.InfoMsg(fmt.Sprintf("%s▶ %s (折叠)", indent, msg))
+	cg.writeln(fmt.Sprintf("%s▶ %s (折叠)", indent, msg))
 	cg.collapsedLevels = append(cg.collapsedLevels, true)
 	cg.indentLevel++
 }
@@ -112,19 +132,7 @@ func (cg *ConsoleGroup) Log(level LogLevel, format string, args ...interface{}) 
 
 	msg := fmt.Sprintf(format, args...)
 	fullMsg := fmt.Sprintf("%s%s", indent, msg)
-
-	switch level {
-	case DEBUG:
-		cg.logger.DebugMsg(fullMsg)
-	case INFO:
-		cg.logger.InfoMsg(fullMsg)
-	case WARN:
-		cg.logger.WarnMsg(fullMsg)
-	case ERROR:
-		cg.logger.ErrorMsg(fullMsg)
-	case FATAL:
-		cg.logger.FatalMsg(fullMsg)
-	}
+	cg.writeln(fullMsg)
 }
 
 // Info 在分组中记录 Info 级别日志
@@ -160,7 +168,7 @@ func (cg *ConsoleGroup) InfoContext(ctx context.Context, format string, args ...
 
 	msg := fmt.Sprintf(format, args...)
 	fullMsg := fmt.Sprintf("%s%s", indent, msg)
-	cg.logger.InfoContext(ctx, "%s", fullMsg)
+	cg.writeln(fullMsg)
 }
 
 // DebugContext 在分组中记录带上下文的 Debug 级别日志
@@ -176,7 +184,7 @@ func (cg *ConsoleGroup) DebugContext(ctx context.Context, format string, args ..
 
 	msg := fmt.Sprintf(format, args...)
 	fullMsg := fmt.Sprintf("%s%s", indent, msg)
-	cg.logger.DebugContext(ctx, "%s", fullMsg)
+	cg.writeln(fullMsg)
 }
 
 // WarnContext 在分组中记录带上下文的 Warn 级别日志
@@ -192,7 +200,7 @@ func (cg *ConsoleGroup) WarnContext(ctx context.Context, format string, args ...
 
 	msg := fmt.Sprintf(format, args...)
 	fullMsg := fmt.Sprintf("%s%s", indent, msg)
-	cg.logger.WarnContext(ctx, "%s", fullMsg)
+	cg.writeln(fullMsg)
 }
 
 // ErrorContext 在分组中记录带上下文的 Error 级别日志
@@ -204,7 +212,7 @@ func (cg *ConsoleGroup) ErrorContext(ctx context.Context, format string, args ..
 	// Error 级别在折叠状态下也要输出
 	msg := fmt.Sprintf(format, args...)
 	fullMsg := fmt.Sprintf("%s%s", indent, msg)
-	cg.logger.ErrorContext(ctx, "%s", fullMsg)
+	cg.writeln(fullMsg)
 }
 
 // Table 在分组中显示表格
@@ -221,18 +229,18 @@ func (cg *ConsoleGroup) Table(data interface{}) {
 
 	table := cg.buildTable(data)
 	if table == nil {
-		cg.logger.WarnMsg(fmt.Sprintf("%s无法构建表格", indent))
+		cg.writeln(fmt.Sprintf("%s无法构建表格", indent))
 		return
 	}
 
 	tableStr := cg.formatTable(table, indent)
-	cg.logger.InfoMsg("\n" + tableStr)
+	cg.writeln("\n" + tableStr)
 }
 
 // Time 开始计时
 // 类似 JavaScript console.time()
 func (cg *ConsoleGroup) Time(label string) *Timer {
-	return NewTimer(cg.logger, label, cg.indentLevel)
+	return NewTimer(cg.output, label, cg.indentLevel)
 }
 
 // getIndent 获取当前缩进

@@ -12,6 +12,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"sync"
 )
 
@@ -361,9 +362,9 @@ func WrapWithEmpty(original ILogger) ILogger {
 
 // NewConsoleGroup 创建空的 ConsoleGroup（不执行任何操作）
 func (e *EmptyLogger) NewConsoleGroup() *ConsoleGroup {
-	// 返回一个假的 ConsoleGroup，所有操作都不会输出
+	// 返回一个假的 ConsoleGroup，所有操作都不会输出（output 为 nil 时 writeln 写入 io.Discard）
 	return &ConsoleGroup{
-		logger:          e,
+		output:          io.Discard,
 		indentLevel:     0,
 		collapsed:       false,
 		collapsedLevels: make([]bool, 0),
@@ -385,7 +386,7 @@ func (e *EmptyLogger) ConsoleTable(data interface{}) {}
 // ConsoleTime 空实现 - 开始计时（返回空的计时器）
 func (e *EmptyLogger) ConsoleTime(label string) *Timer {
 	return &Timer{
-		logger: e,
+		output: io.Discard,
 		label:  label,
 	}
 }

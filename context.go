@@ -118,6 +118,52 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 	return string(buf)
 }
 
+// extractContextFieldsWithCompiledKeys 从 context 中提取键值对，返回 map 形式
+// 用于 JSON 格式输出，使 traceId 等信息成为 JSON 字段而非 prepend 文本
+func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledContextKey) map[string]any {
+	if ctx == nil || len(keys) == 0 {
+		return nil
+	}
+
+	var (
+		incomingMD metadata.MD
+		mdLoaded   bool
+		hasMD      bool
+	)
+
+	fields := make(map[string]any, len(keys))
+
+	for _, key := range keys {
+		value := ""
+		if raw := ctx.Value(key.key); raw != nil {
+			if text, ok := raw.(string); ok && text != "" {
+				value = text
+			}
+		}
+
+		if value == "" {
+			if !mdLoaded {
+				incomingMD, hasMD = metadata.FromIncomingContext(ctx)
+				mdLoaded = true
+			}
+			if hasMD {
+				if values := incomingMD.Get(key.key); len(values) > 0 && values[0] != "" {
+					value = values[0]
+				}
+			}
+		}
+
+		if value != "" {
+			fields[key.key] = value
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
+}
+
 // WithContextKeys 配置 Logger 在记录 Context 日志时提取哪些 key
 func (l *Logger) WithContextKeys(keys ...string) *Logger {
 	l.contextKeys = compileContextKeys(keys)

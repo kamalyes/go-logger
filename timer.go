@@ -12,14 +12,17 @@ package logger
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
 // Timer 计时器
+// 输出直接写入 output（默认 os.Stdout），不走 logger 格式化
 type Timer struct {
-	logger      ILogger
+	output      io.Writer
 	label       string
 	startTime   time.Time
 	indentLevel int
@@ -96,9 +99,13 @@ func SetTimerCleanupInterval(interval time.Duration) {
 }
 
 // NewTimer 创建新的计时器
-func NewTimer(logger ILogger, label string, indentLevel int) *Timer {
+// output 为输出目标，传入 nil 则使用 os.Stdout
+func NewTimer(output io.Writer, label string, indentLevel int) *Timer {
+	if output == nil {
+		output = os.Stdout
+	}
 	timer := &Timer{
-		logger:      logger,
+		output:      output,
 		label:       label,
 		startTime:   time.Now(),
 		indentLevel: indentLevel,
@@ -106,7 +113,7 @@ func NewTimer(logger ILogger, label string, indentLevel int) *Timer {
 
 	// 记录开始信息
 	indent := strings.Repeat("  ", indentLevel)
-	logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: 计时开始", indent, label))
+	fmt.Fprintf(timer.output, "%s⏱️  %s: 计时开始\n", indent, label)
 
 	// 存储到 sync.Map（优化：避免全局锁竞争）
 	timers.Store(label, timer)
@@ -125,7 +132,7 @@ func (t *Timer) End() time.Duration {
 
 	// 格式化耗时
 	timeStr := formatDuration(elapsed)
-	t.logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: %s", indent, t.label, timeStr))
+	fmt.Fprintf(t.output, "%s⏱️  %s: %s\n", indent, t.label, timeStr)
 
 	// 从 sync.Map 中移除（优化：避免全局锁竞争）
 	timers.Delete(t.label)
@@ -146,9 +153,9 @@ func (t *Timer) Log(msg string, args ...interface{}) time.Duration {
 	message := fmt.Sprintf(msg, args...)
 
 	if message != "" {
-		t.logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: %s - %s", indent, t.label, timeStr, message))
+		fmt.Fprintf(t.output, "%s⏱️  %s: %s - %s\n", indent, t.label, timeStr, message)
 	} else {
-		t.logger.InfoMsg(fmt.Sprintf("%s⏱️  %s: %s", indent, t.label, timeStr))
+		fmt.Fprintf(t.output, "%s⏱️  %s: %s\n", indent, t.label, timeStr)
 	}
 
 	return elapsed

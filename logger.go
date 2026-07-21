@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -125,6 +126,12 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 		return
 	}
 
+	// JSON 格式走专用路径，输出结构化 JSON（无额外 fields）
+	if l.format == FormatJSON {
+		l.writeJSONEntry(level, msg, nil)
+		return
+	}
+
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
 	defer bytePool.Put(buf)
@@ -141,16 +148,9 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
 	buf = append(buf, prefix...)
 
-	// 添加调用者信息（如果需要）
+	// 添加调用者信息（如果需要）- 复用 findExternalCaller 保证跨平台和调用栈准确性
 	if l.showCaller {
-		if pc, file, line, ok := runtime.Caller(3); ok {
-			funcName := runtime.FuncForPC(pc).Name()
-			if idx := strings.LastIndex(funcName, "."); idx != -1 {
-				funcName = funcName[idx+1:]
-			}
-			if idx := strings.LastIndex(file, "/"); idx != -1 {
-				file = file[idx+1:]
-			}
+		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, '[')
 			buf = append(buf, convert.S2B(file)...)
 			buf = append(buf, ':')
@@ -173,6 +173,276 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	if level == FATAL {
 		os.Exit(1)
 	}
+}
+
+// writeJSONEntry 输出 JSON 格式日志条目
+// traceId 等上下文字段、KV 字段都会作为 JSON 顶层字段输出，便于日志收集系统（如 openobserve）索引
+func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]any) {
+	// 使用有序键值对构建，避免 map 遍历顺序不稳定
+	// 同时复用 bytePool 减少分配
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	buf = append(buf, '{')
+
+	// timestamp
+	buf = appendJSONKey(buf, l.timestampKey)
+	buf = append(buf, '"')
+	buf = stringx.FastFormatTime(buf, time.Now())
+	buf = append(buf, '"')
+
+	// level
+	buf = append(buf, ',')
+	buf = appendJSONKey(buf, l.levelKey)
+	buf = append(buf, '"')
+	buf = append(buf, convert.S2B(level.String())...)
+	buf = append(buf, '"')
+
+	// prefix（如果有）
+	if l.prefix != "" {
+		buf = append(buf, ',')
+		buf = appendJSONKey(buf, "prefix")
+		buf = appendJSONString(buf, strings.TrimSpace(l.prefix))
+	}
+
+	// message
+	buf = append(buf, ',')
+	buf = appendJSONKey(buf, l.messageKey)
+	buf = appendJSONString(buf, msg)
+
+	// caller（如果启用）- 用循环回溯找到第一个 go-logger 包外的调用者
+	if l.showCaller {
+		if file, line, funcName := l.findExternalCaller(); file != "" {
+			buf = append(buf, ',')
+			buf = appendJSONKey(buf, l.callerKey)
+			buf = appendJSONString(buf, fmt.Sprintf("%s:%d", file, line))
+			buf = append(buf, ',')
+			buf = appendJSONKey(buf, "callerfunc")
+			buf = appendJSONString(buf, funcName)
+		}
+	}
+
+	// 额外 fields（traceId、KV 等）
+	for k, v := range fields {
+		buf = append(buf, ',')
+		buf = appendJSONKey(buf, k)
+		buf = appendJSONValue(buf, v)
+	}
+
+	buf = append(buf, '}', '\n')
+
+	l.mu.Lock()
+	l.output.Write(buf)
+	l.mu.Unlock()
+
+	if level == FATAL {
+		os.Exit(1)
+	}
+}
+
+// ultraLogWithFields 带额外 fields 的日志方法
+// JSON 模式下 fields 作为 JSON 顶层字段输出；text 模式下 fields 拼接到 msg 后调用 ultraLog
+func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[string]any) {
+	if level < l.level {
+		return
+	}
+
+	if l.format == FormatJSON {
+		l.writeJSONEntry(level, msg, fields)
+		return
+	}
+
+	// text 模式：保持原 logWithFields 的拼接格式
+	if len(fields) == 0 {
+		l.ultraLog(level, msg)
+		return
+	}
+
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	buf = append(buf, convert.S2B(msg)...)
+	buf = append(buf, kvBraceOpen...)
+
+	first := true
+	for k, v := range fields {
+		if !first {
+			buf = append(buf, kvDelimiter...)
+		}
+		buf = append(buf, convert.S2B(k)...)
+		buf = append(buf, kvSeparator...)
+		buf = convert.AppendValue(buf, v)
+		first = false
+	}
+
+	buf = append(buf, kvBraceClose...)
+	l.ultraLog(level, string(buf))
+}
+
+// extractContextFields 从上下文提取信息为 map（用于 JSON 输出）
+// 与 extractContextInfo 对应，但返回 map 而非拼接字符串
+// 自定义 extractor 返回 string 无法拆分为 fields，降级放入 "context" 字段保留信息
+func (l *Logger) extractContextFields(ctx context.Context) map[string]any {
+	if ctx == nil {
+		return nil
+	}
+	if l.contextExtractor != nil {
+		info := l.contextExtractor(ctx)
+		if info = strings.TrimSpace(info); info != "" {
+			return map[string]any{"context": info}
+		}
+		return nil
+	}
+	return extractContextFieldsWithCompiledKeys(ctx, l.contextKeys)
+}
+
+// appendJSONKey 追加 JSON 键（假设 key 是简单 ASCII 字符串，无需转义）
+func appendJSONKey(buf []byte, key string) []byte {
+	buf = append(buf, '"')
+	buf = append(buf, convert.S2B(key)...)
+	buf = append(buf, '"', ':')
+	return buf
+}
+
+// appendJSONString 追加 JSON 字符串值（带转义处理）
+func appendJSONString(buf []byte, s string) []byte {
+	buf = append(buf, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			buf = append(buf, '\\', '"')
+		case '\\':
+			buf = append(buf, '\\', '\\')
+		case '\n':
+			buf = append(buf, '\\', 'n')
+		case '\r':
+			buf = append(buf, '\\', 'r')
+		case '\t':
+			buf = append(buf, '\\', 't')
+		case '\b':
+			buf = append(buf, '\\', 'b')
+		case '\f':
+			buf = append(buf, '\\', 'f')
+		default:
+			if c < 0x20 {
+				buf = append(buf, '\\', 'u', '0', '0',
+					hexChars[c>>4], hexChars[c&0xf])
+			} else {
+				buf = append(buf, c)
+			}
+		}
+	}
+	buf = append(buf, '"')
+	return buf
+}
+
+// appendJSONValue 追加 JSON 值（根据类型序列化）
+func appendJSONValue(buf []byte, v any) []byte {
+	switch val := v.(type) {
+	case string:
+		return appendJSONString(buf, val)
+	case bool:
+		if val {
+			return append(buf, 't', 'r', 'u', 'e')
+		}
+		return append(buf, 'f', 'a', 'l', 's', 'e')
+	case int:
+		return strconv.AppendInt(buf, int64(val), 10)
+	case int8:
+		return strconv.AppendInt(buf, int64(val), 10)
+	case int16:
+		return strconv.AppendInt(buf, int64(val), 10)
+	case int32:
+		return strconv.AppendInt(buf, int64(val), 10)
+	case int64:
+		return strconv.AppendInt(buf, val, 10)
+	case uint:
+		return strconv.AppendUint(buf, uint64(val), 10)
+	case uint8:
+		return strconv.AppendUint(buf, uint64(val), 10)
+	case uint16:
+		return strconv.AppendUint(buf, uint64(val), 10)
+	case uint32:
+		return strconv.AppendUint(buf, uint64(val), 10)
+	case uint64:
+		return strconv.AppendUint(buf, val, 10)
+	case float32:
+		return strconv.AppendFloat(buf, float64(val), 'f', -1, 32)
+	case float64:
+		return strconv.AppendFloat(buf, val, 'f', -1, 64)
+	case nil:
+		return append(buf, 'n', 'u', 'l', 'l')
+	default:
+		// 其他类型降级用 fmt.Sprintf 转字符串后输出
+		return appendJSONString(buf, fmt.Sprintf("%v", v))
+	}
+}
+
+// hexChars 用于 JSON unicode 转义
+var hexChars = []byte("0123456789abcdef")
+
+// findExternalCaller 回溯调用栈，找到第一个不在 go-logger/reflect/testing/runtime 内的调用者
+// 用函数名判断（跨平台稳定），不依赖文件路径分隔符
+func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
+	for depth := 2; depth < 20; depth++ {
+		pc, f, ln, ok := runtime.Caller(depth)
+		if !ok {
+			break
+		}
+		fn := runtime.FuncForPC(pc).Name()
+		if isInternalCaller(fn, f) {
+			continue
+		}
+		// 简化文件名：兼容 Windows 反斜杠和 Unix 正斜杠
+		if idx := strings.LastIndexAny(f, `/\`); idx != -1 {
+			f = f[idx+1:]
+		}
+		return f, ln, fn
+	}
+	return "", 0, ""
+}
+
+// isInternalCaller 根据函数名和文件名判断是否为需要跳过的内部调用
+// 跳过 go-logger 自身、reflect 反射、testing 框架、runtime 内部
+// 注意：_test.go 文件即使属于 go-logger 包也不跳过（测试代码本身就是调用者）
+func isInternalCaller(funcName, file string) bool {
+	if strings.HasSuffix(file, "_test.go") {
+		return false
+	}
+	if strings.Contains(funcName, "kamalyes/go-logger") {
+		return true
+	}
+	if strings.HasPrefix(funcName, "reflect.") {
+		return true
+	}
+	if strings.HasPrefix(funcName, "testing.") {
+		return true
+	}
+	if strings.HasPrefix(funcName, "runtime.") {
+		return true
+	}
+	return false
+}
+
+// logWithContextFormat 是 *Context 系列方法的公共实现
+// 统一处理 level 检查、JSON/text 模式分支、traceId 提取
+func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, format string, args ...any) {
+	if level < l.level {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	if l.format == FormatJSON {
+		l.ultraLogWithFields(level, msg, l.extractContextFields(ctx))
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	if contextInfo != "" {
+		msg = contextInfo + msg
+	}
+	l.ultraLog(level, msg)
 }
 
 // ultraLogf 极致优化的格式化日志方法
@@ -389,55 +659,23 @@ func (l *Logger) extractContextInfo(ctx context.Context) string {
 
 // 带上下文的日志方法
 func (l *Logger) DebugContext(ctx context.Context, format string, args ...any) {
-	if l.level > DEBUG {
-		return
-	}
-	contextInfo := l.extractContextInfo(ctx)
-	if contextInfo != "" {
-		format = contextInfo + format
-	}
-	l.ultraLogf(DEBUG, format, args...)
+	l.logWithContextFormat(ctx, DEBUG, format, args...)
 }
 
 func (l *Logger) InfoContext(ctx context.Context, format string, args ...any) {
-	if l.level > INFO {
-		return
-	}
-	contextInfo := l.extractContextInfo(ctx)
-	if contextInfo != "" {
-		format = contextInfo + format
-	}
-	l.ultraLogf(INFO, format, args...)
+	l.logWithContextFormat(ctx, INFO, format, args...)
 }
 
 func (l *Logger) WarnContext(ctx context.Context, format string, args ...any) {
-	if l.level > WARN {
-		return
-	}
-	contextInfo := l.extractContextInfo(ctx)
-	if contextInfo != "" {
-		format = contextInfo + format
-	}
-	l.ultraLogf(WARN, format, args...)
+	l.logWithContextFormat(ctx, WARN, format, args...)
 }
 
 func (l *Logger) ErrorContext(ctx context.Context, format string, args ...any) {
-	if l.level > ERROR {
-		return
-	}
-	contextInfo := l.extractContextInfo(ctx)
-	if contextInfo != "" {
-		format = contextInfo + format
-	}
-	l.ultraLogf(ERROR, format, args...)
+	l.logWithContextFormat(ctx, ERROR, format, args...)
 }
 
 func (l *Logger) FatalContext(ctx context.Context, format string, args ...any) {
-	contextInfo := l.extractContextInfo(ctx)
-	if contextInfo != "" {
-		format = contextInfo + format
-	}
-	l.ultraLogf(FATAL, format, args...)
+	l.logWithContextFormat(ctx, FATAL, format, args...)
 }
 
 // ============================================================================
@@ -461,6 +699,13 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 			l.logWithFields(level, msg, objFields)
 			return
 		}
+	}
+
+	// JSON 模式：把 KV 转为 fields map，作为 JSON 顶层字段输出
+	if l.format == FormatJSON {
+		fields := kvToFields(keysAndValues)
+		l.ultraLogWithFields(level, msg, fields)
+		return
 	}
 
 	// 快速构建带键值对的消息
@@ -492,9 +737,36 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	l.ultraLog(level, string(buf))
 }
 
+// kvToFields 将键值对切片转为 map[string]any
+// 用于 JSON 模式下将 KV 作为 JSON 顶层字段输出
+func kvToFields(keysAndValues []any) map[string]any {
+	if len(keysAndValues) == 0 {
+		return nil
+	}
+	fields := make(map[string]any, len(keysAndValues)/2+1)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			key = fmt.Sprintf("%v", keysAndValues[i])
+		}
+		if i+1 < len(keysAndValues) {
+			fields[key] = keysAndValues[i+1]
+		} else {
+			fields[key] = "<missing>"
+		}
+	}
+	return fields
+}
+
 // logWithFields 使用字段映射记录日志
 func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any) {
 	if level < l.level {
+		return
+	}
+
+	// JSON 模式：fields 作为 JSON 顶层字段输出
+	if l.format == FormatJSON {
+		l.ultraLogWithFields(level, msg, fields)
 		return
 	}
 
@@ -531,7 +803,25 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 		return
 	}
 
-	// 先从context提取信息
+	// JSON 模式：traceId 和 KV 都作为 JSON 顶层字段输出
+	if l.format == FormatJSON {
+		fields := l.extractContextFields(ctx)
+		if len(keysAndValues) > 0 {
+			// 合并 KV 到 fields（KV 优先级高于 context）
+			if fields == nil {
+				fields = kvToFields(keysAndValues)
+			} else {
+				kvFields := kvToFields(keysAndValues)
+				for k, v := range kvFields {
+					fields[k] = v
+				}
+			}
+		}
+		l.ultraLogWithFields(level, msg, fields)
+		return
+	}
+
+	// text 模式：先从 context 提取信息 prepend 到 msg
 	contextInfo := l.extractContextInfo(ctx)
 	if contextInfo != "" {
 		msg = contextInfo + msg
@@ -652,6 +942,11 @@ func (l *Logger) Log(level LogLevel, msg string) {
 
 func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
 	if level < l.level {
+		return
+	}
+	// JSON 模式：traceId 作为 JSON 顶层字段
+	if l.format == FormatJSON {
+		l.ultraLogWithFields(level, msg, l.extractContextFields(ctx))
 		return
 	}
 	contextInfo := l.extractContextInfo(ctx)
@@ -783,7 +1078,7 @@ func (l *Logger) ErrorKVReturn(msg string, keysAndValues ...any) error {
 func (l *Logger) getOrCreateConsoleGroup() *ConsoleGroup {
 	l.consoleGroupOnce.Do(func() {
 		l.consoleGroup = &ConsoleGroup{
-			logger:          l,
+			output:          l.output,
 			indentLevel:     0,
 			collapsed:       false,
 			collapsedLevels: make([]bool, 0, 16), // 预分配 16 层嵌套容量
@@ -1001,62 +1296,63 @@ func (f *fieldLogger) DebugLines(lines ...string) {
 	}
 }
 
-// 上下文日志方法
-func (f *fieldLogger) DebugContext(ctx context.Context, format string, args ...any) {
-	if f.logger.level > DEBUG {
+// mergeContextFields 合并 context 提取的 fields 和 f.fields（用于 JSON 模式）
+// traceId 等上下文字段与 f.fields 合并，f.fields 优先级更高（避免被覆盖）
+func (f *fieldLogger) mergeContextFields(ctx context.Context) map[string]any {
+	ctxFields := f.logger.extractContextFields(ctx)
+	if len(f.fields) == 0 {
+		return ctxFields
+	}
+	if ctxFields == nil {
+		return f.fields
+	}
+	merged := make(map[string]any, len(ctxFields)+len(f.fields))
+	for k, v := range ctxFields {
+		merged[k] = v
+	}
+	for k, v := range f.fields {
+		merged[k] = v
+	}
+	return merged
+}
+
+// logWithContextFieldsFormat 是 fieldLogger.*Context 系列方法的公共实现
+// 统一处理 level 检查、JSON/text 模式分支、traceId + f.fields 合并
+func (f *fieldLogger) logWithContextFieldsFormat(ctx context.Context, level LogLevel, format string, args ...any) {
+	if level < f.logger.level {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	if f.logger.format == FormatJSON {
+		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
 		return
 	}
 	contextInfo := f.logger.extractContextInfo(ctx)
-	msg := fmt.Sprintf(format, args...)
 	if contextInfo != "" {
 		msg = contextInfo + msg
 	}
-	f.logger.logWithFields(DEBUG, msg, f.fields)
+	f.logger.logWithFields(level, msg, f.fields)
+}
+
+// 上下文日志方法
+func (f *fieldLogger) DebugContext(ctx context.Context, format string, args ...any) {
+	f.logWithContextFieldsFormat(ctx, DEBUG, format, args...)
 }
 
 func (f *fieldLogger) InfoContext(ctx context.Context, format string, args ...any) {
-	if !f.logger.IsLevelEnabled(INFO) {
-		return
-	}
-	contextInfo := f.logger.extractContextInfo(ctx)
-	msg := fmt.Sprintf(format, args...)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(INFO, msg, f.fields)
+	f.logWithContextFieldsFormat(ctx, INFO, format, args...)
 }
 
 func (f *fieldLogger) WarnContext(ctx context.Context, format string, args ...any) {
-	if !f.logger.IsLevelEnabled(WARN) {
-		return
-	}
-	contextInfo := f.logger.extractContextInfo(ctx)
-	msg := fmt.Sprintf(format, args...)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(WARN, msg, f.fields)
+	f.logWithContextFieldsFormat(ctx, WARN, format, args...)
 }
 
 func (f *fieldLogger) ErrorContext(ctx context.Context, format string, args ...any) {
-	if !f.logger.IsLevelEnabled(ERROR) {
-		return
-	}
-	contextInfo := f.logger.extractContextInfo(ctx)
-	msg := fmt.Sprintf(format, args...)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(ERROR, msg, f.fields)
+	f.logWithContextFieldsFormat(ctx, ERROR, format, args...)
 }
 
 func (f *fieldLogger) FatalContext(ctx context.Context, format string, args ...any) {
-	contextInfo := f.logger.extractContextInfo(ctx)
-	msg := fmt.Sprintf(format, args...)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(FATAL, msg, f.fields)
+	f.logWithContextFieldsFormat(ctx, FATAL, format, args...)
 }
 
 // 键值对日志方法
@@ -1183,6 +1479,11 @@ func (f *fieldLogger) Log(level LogLevel, msg string) {
 
 func (f *fieldLogger) LogContext(ctx context.Context, level LogLevel, msg string) {
 	if !f.logger.IsLevelEnabled(level) {
+		return
+	}
+	// JSON 模式：traceId 和 f.fields 都作为 JSON 顶层字段
+	if f.logger.format == FormatJSON {
+		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
 		return
 	}
 	contextInfo := f.logger.extractContextInfo(ctx)

@@ -129,6 +129,8 @@ func (s *ConsoleTestSuite) TestCollapsedGroupFiltering() {
 }
 
 // TestGroupWithContext 测试带上下文的分组日志
+// ConsoleGroup 是控制台展示功能，不走 logger 格式化，不提取 traceId
+// InfoContext 的 ctx 参数仅保留用于 API 兼容，输出为纯文本
 func (s *ConsoleTestSuite) TestGroupWithContext() {
 	traceID := random.UUID()
 	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
@@ -138,8 +140,9 @@ func (s *ConsoleTestSuite) TestGroupWithContext() {
 
 	cg.InfoContext(ctx, "message with context")
 	output := s.buffer.String()
-	assert.Contains(s.T(), output, traceID)
+	// ConsoleGroup 不走 logger 格式化，不提取 traceId，只输出纯文本消息
 	assert.Contains(s.T(), output, "message with context")
+	assert.NotContains(s.T(), output, traceID)
 }
 
 // TestConsoleTable 测试表格功能
