@@ -1,9 +1,9 @@
 module github.com/kamalyes/go-logger
 
-go 1.24.0
+go 1.25
 
 require (
-	github.com/kamalyes/go-toolbox v0.15.3
+	github.com/kamalyes/go-toolbox v0.15.4
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -11,8 +11,10 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/kamalyes/go-argus v0.2.1 // indirect
+	github.com/kamalyes/go-argus v0.2.3 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
