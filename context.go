@@ -14,17 +14,14 @@ import (
 	"context"
 
 	"github.com/kamalyes/go-toolbox/pkg/convert"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/metadata"
 )
 
-const (
-	ContextKeyTraceID = "trace_id"
-)
-
-// Metadata keys - 用于从 gRPC metadata 获取
-const (
-	MetadataKeyTraceID = "x-trace-id"
-)
+// ContextKeyTraceID 是 traceId 在日志输出的字段名，同时作为 ctx.Value 的 fallback key
+// traceId 的唯一真相源是 OTel span（gRPC 的 otelgrpc StatsHandler / HTTP 的 Tracing 中间件创建）
+// extract 优先从 OTel span 提取；当 ctx 不在 span 内时，fallback 到 ctx.Value("trace_id")
+const ContextKeyTraceID = "trace_id"
 
 type compiledContextKey struct {
 	key      string
@@ -33,10 +30,23 @@ type compiledContextKey struct {
 
 var defaultContextKeys = []string{
 	ContextKeyTraceID,
-	MetadataKeyTraceID,
 }
 
 var defaultCompiledContextKeys = compileContextKeys(defaultContextKeys)
+
+// extractOTelTraceID 从 OTel span 提取 traceId
+// OTel span 是 traceId 的单一真相源：gRPC（otelgrpc StatsHandler）和 HTTP（Tracing 中间件）均由 OTel 创建 span
+// 当 ctx 不在 span 内时返回空字符串，调用方 fallback 到 ctx.Value / metadata
+func extractOTelTraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.HasTraceID() {
+		return ""
+	}
+	return sc.TraceID().String()
+}
 
 // DefaultContextKeys 返回默认上下文提取 key
 func DefaultContextKeys() []compiledContextKey {
@@ -59,8 +69,44 @@ func compileContextKeys(keys []string) []compiledContextKey {
 	return compiled
 }
 
+// mdCache 延迟加载 gRPC incoming metadata，避免多次重复解析
+type mdCache struct {
+	md     metadata.MD
+	loaded bool
+	has    bool
+}
+
+// get 从 metadata 获取指定 key 的首个非空值（首次调用时延迟加载）
+func (c *mdCache) get(ctx context.Context, key string) string {
+	if !c.loaded {
+		c.md, c.has = metadata.FromIncomingContext(ctx)
+		c.loaded = true
+	}
+	if !c.has {
+		return ""
+	}
+	if values := c.md.Get(key); len(values) > 0 && values[0] != "" {
+		return values[0]
+	}
+	return ""
+}
+
+// extractKeyValue 从 context 提取单个 key 的值
+// 优先级：OTel traceId（仅 trace_id key）> ctx.Value > gRPC metadata
+func extractKeyValue(ctx context.Context, key compiledContextKey, otelTraceID string, md *mdCache) string {
+	if key.key == ContextKeyTraceID && otelTraceID != "" {
+		return otelTraceID
+	}
+	if raw := ctx.Value(key.key); raw != nil {
+		if text, ok := raw.(string); ok && text != "" {
+			return text
+		}
+	}
+	return md.get(ctx, key.key)
+}
+
 func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextKey) string {
-	if ctx == nil || len(keys) == 0 {
+	if ctx == nil {
 		return ""
 	}
 
@@ -71,36 +117,31 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 	buf = append(buf, '[')
 
 	var (
-		incomingMD metadata.MD
-		mdLoaded   bool
-		hasMD      bool
+		md         mdCache
 		wroteField bool
 	)
 
+	// traceId 始终从 OTel span 提取（单一真相源），独立于 keys 配置
+	// 即使 keys 为空或不含 trace_id，也输出 traceId，保证全链路日志打通
+	otelTraceID := extractOTelTraceID(ctx)
+	traceIDWritten := false
+	if otelTraceID != "" {
+		buf = append(buf, convert.S2B(ContextKeyTraceID)...)
+		buf = append(buf, '=')
+		buf = append(buf, convert.S2B(otelTraceID)...)
+		wroteField = true
+		traceIDWritten = true
+	}
+
 	for _, key := range keys {
-		value := ""
-		if raw := ctx.Value(key.key); raw != nil {
-			if text, ok := raw.(string); ok && text != "" {
-				value = text
-			}
+		// trace_id 已由 OTel 写入，跳过
+		if key.key == ContextKeyTraceID && traceIDWritten {
+			continue
 		}
-
-		if value == "" {
-			if !mdLoaded {
-				incomingMD, hasMD = metadata.FromIncomingContext(ctx)
-				mdLoaded = true
-			}
-			if hasMD {
-				if values := incomingMD.Get(key.key); len(values) > 0 && values[0] != "" {
-					value = values[0]
-				}
-			}
-		}
-
+		value := extractKeyValue(ctx, key, otelTraceID, &md)
 		if value == "" {
 			continue
 		}
-
 		if wroteField {
 			buf = append(buf, ' ')
 		}
@@ -121,39 +162,28 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 // extractContextFieldsWithCompiledKeys 从 context 中提取键值对，返回 map 形式
 // 用于 JSON 格式输出，使 traceId 等信息成为 JSON 字段而非 prepend 文本
 func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledContextKey) map[string]any {
-	if ctx == nil || len(keys) == 0 {
+	if ctx == nil {
 		return nil
 	}
 
-	var (
-		incomingMD metadata.MD
-		mdLoaded   bool
-		hasMD      bool
-	)
+	var md mdCache
+	fields := make(map[string]any, len(keys)+1)
 
-	fields := make(map[string]any, len(keys))
+	// traceId 始终从 OTel span 提取（单一真相源），独立于 keys 配置
+	// 即使 keys 为空或不含 trace_id，也输出 traceId，保证全链路日志打通
+	otelTraceID := extractOTelTraceID(ctx)
+	traceIDWritten := false
+	if otelTraceID != "" {
+		fields[ContextKeyTraceID] = otelTraceID
+		traceIDWritten = true
+	}
 
 	for _, key := range keys {
-		value := ""
-		if raw := ctx.Value(key.key); raw != nil {
-			if text, ok := raw.(string); ok && text != "" {
-				value = text
-			}
+		// trace_id 已由 OTel 写入，跳过
+		if key.key == ContextKeyTraceID && traceIDWritten {
+			continue
 		}
-
-		if value == "" {
-			if !mdLoaded {
-				incomingMD, hasMD = metadata.FromIncomingContext(ctx)
-				mdLoaded = true
-			}
-			if hasMD {
-				if values := incomingMD.Get(key.key); len(values) > 0 && values[0] != "" {
-					value = values[0]
-				}
-			}
-		}
-
-		if value != "" {
+		if value := extractKeyValue(ctx, key, otelTraceID, &md); value != "" {
 			fields[key.key] = value
 		}
 	}
