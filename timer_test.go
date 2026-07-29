@@ -12,6 +12,7 @@ package logger
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,16 +20,41 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+// safeBuffer 线程安全的 bytes.Buffer，用于并发测试场景
+// bytes.Buffer 本身非线程安全，多个 goroutine 共享同一个 buffer 时需要加锁保护
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *safeBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 // TimerTestSuite 计时器测试套件
 type TimerTestSuite struct {
 	suite.Suite
 	logger *Logger
-	buffer *bytes.Buffer
+	buffer *safeBuffer
 }
 
 // SetupTest 每个测试前的设置
 func (s *TimerTestSuite) SetupTest() {
-	s.buffer = &bytes.Buffer{}
+	s.buffer = &safeBuffer{}
 	s.logger = NewLogger().
 		WithOutput(s.buffer).
 		WithLevel(DEBUG).

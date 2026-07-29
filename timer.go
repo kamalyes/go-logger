@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,11 +39,23 @@ const (
 	defaultCleanupInterval = 5 * time.Minute // 默认清理间隔
 )
 
-var (
-	timerCleanupOnce sync.Once
-	timerMaxAge      = defaultTimerMaxAge
-	cleanupInterval  = defaultCleanupInterval
-)
+// timerConfig 计时器配置（原子读写，避免 data race）
+// 使用 atomic.Pointer[time.Duration] 而非裸变量，确保 SetXxx 与 cleanup goroutine 之间无竞争
+type timerConfig struct {
+	maxAge    atomic.Pointer[time.Duration]
+	interval  atomic.Pointer[time.Duration]
+	reloadCh  chan struct{} // 通知 cleanup goroutine 重建 ticker
+	startOnce sync.Once
+}
+
+var timerCfg = func() *timerConfig {
+	c := &timerConfig{reloadCh: make(chan struct{}, 1)}
+	defaultMaxAge := defaultTimerMaxAge
+	defaultInterval := defaultCleanupInterval
+	c.maxAge.Store(&defaultMaxAge)
+	c.interval.Store(&defaultInterval)
+	return c
+}()
 
 // init 初始化自动清理
 func init() {
@@ -50,14 +63,27 @@ func init() {
 }
 
 // startTimerCleanup 启动自动清理 goroutine
+// 内部循环每次按当前 interval 重建 ticker，SetTimerCleanupInterval 通过 reloadCh 触发重建
 func startTimerCleanup() {
-	timerCleanupOnce.Do(func() {
+	timerCfg.startOnce.Do(func() {
 		go func() {
-			ticker := time.NewTicker(cleanupInterval)
-			defer ticker.Stop()
-
-			for range ticker.C {
-				cleanupExpiredTimers()
+			for {
+				interval := *timerCfg.interval.Load()
+				if interval <= 0 {
+					interval = defaultCleanupInterval
+				}
+				ticker := time.NewTicker(interval)
+				func() {
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							cleanupExpiredTimers()
+						case <-timerCfg.reloadCh:
+							return // 重建 ticker 以应用新的 interval
+						}
+					}
+				}()
 			}
 		}()
 	})
@@ -67,6 +93,7 @@ func startTimerCleanup() {
 func cleanupExpiredTimers() int {
 	count := 0
 	now := time.Now()
+	maxAge := *timerCfg.maxAge.Load()
 
 	timers.Range(func(key, value any) bool {
 		timer := value.(*Timer)
@@ -74,7 +101,7 @@ func cleanupExpiredTimers() int {
 		age := now.Sub(timer.startTime)
 		timer.mutex.Unlock()
 
-		if age > timerMaxAge {
+		if age > maxAge {
 			timers.Delete(key)
 			count++
 		}
@@ -84,22 +111,30 @@ func cleanupExpiredTimers() int {
 	return count
 }
 
-// SetTimerMaxAge 设置计时器最大存活时间（可选配置）
+// SetTimerMaxAge 设置计时器最大存活时间（可选配置，热更新，线程安全）
 func SetTimerMaxAge(maxAge time.Duration) {
 	if maxAge > 0 {
-		timerMaxAge = maxAge
+		v := maxAge
+		timerCfg.maxAge.Store(&v)
 	}
 }
 
-// SetTimerCleanupInterval 设置清理间隔（可选配置）
+// SetTimerCleanupInterval 设置清理间隔（可选配置，立即生效，触发 cleanup goroutine 重建 ticker）
 func SetTimerCleanupInterval(interval time.Duration) {
 	if interval > 0 {
-		cleanupInterval = interval
+		v := interval
+		timerCfg.interval.Store(&v)
+		// 非阻塞通知 cleanup goroutine 重建 ticker；若 reloadCh 已有未消费消息则跳过（下一次循环会读到新值）
+		select {
+		case timerCfg.reloadCh <- struct{}{}:
+		default:
+		}
 	}
 }
 
 // NewTimer 创建新的计时器
 // output 为输出目标，传入 nil 则使用 os.Stdout
+// 注意：如果多个 Timer 共享同一个 io.Writer，该 Writer 必须是线程安全的（如 os.Stdout）
 func NewTimer(output io.Writer, label string, indentLevel int) *Timer {
 	if output == nil {
 		output = os.Stdout
@@ -111,9 +146,11 @@ func NewTimer(output io.Writer, label string, indentLevel int) *Timer {
 		indentLevel: indentLevel,
 	}
 
-	// 记录开始信息
+	// 记录开始信息（加锁保护，与 End/Log 串行）
+	timer.mutex.Lock()
 	indent := strings.Repeat("  ", indentLevel)
 	fmt.Fprintf(timer.output, "%s⏱️  %s: 计时开始\n", indent, label)
+	timer.mutex.Unlock()
 
 	// 存储到 sync.Map（优化：避免全局锁竞争）
 	timers.Store(label, timer)

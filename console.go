@@ -121,9 +121,10 @@ func (cg *ConsoleGroup) isInCollapsedGroup() bool {
 // Log 在当前分组中记录日志
 func (cg *ConsoleGroup) Log(level LogLevel, format string, args ...interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
 	isCollapsed := cg.isInCollapsedGroup()
-	cg.mutex.Unlock()
 
 	// 如果在折叠分组中，只输出 ERROR 和 FATAL 级别的日志
 	if isCollapsed && level != ERROR && level != FATAL {
@@ -158,9 +159,10 @@ func (cg *ConsoleGroup) Error(format string, args ...interface{}) {
 // InfoContext 在分组中记录带上下文的 Info 级别日志
 func (cg *ConsoleGroup) InfoContext(ctx context.Context, format string, args ...interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
 	isCollapsed := cg.isInCollapsedGroup()
-	cg.mutex.Unlock()
 
 	if isCollapsed {
 		return // 折叠状态下不输出 Info
@@ -174,9 +176,10 @@ func (cg *ConsoleGroup) InfoContext(ctx context.Context, format string, args ...
 // DebugContext 在分组中记录带上下文的 Debug 级别日志
 func (cg *ConsoleGroup) DebugContext(ctx context.Context, format string, args ...interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
 	isCollapsed := cg.isInCollapsedGroup()
-	cg.mutex.Unlock()
 
 	if isCollapsed {
 		return // 折叠状态下不输出 Debug
@@ -190,9 +193,10 @@ func (cg *ConsoleGroup) DebugContext(ctx context.Context, format string, args ..
 // WarnContext 在分组中记录带上下文的 Warn 级别日志
 func (cg *ConsoleGroup) WarnContext(ctx context.Context, format string, args ...interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
 	isCollapsed := cg.isInCollapsedGroup()
-	cg.mutex.Unlock()
 
 	if isCollapsed {
 		return // 折叠状态下不输出 Warn
@@ -206,8 +210,9 @@ func (cg *ConsoleGroup) WarnContext(ctx context.Context, format string, args ...
 // ErrorContext 在分组中记录带上下文的 Error 级别日志
 func (cg *ConsoleGroup) ErrorContext(ctx context.Context, format string, args ...interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
-	cg.mutex.Unlock()
 
 	// Error 级别在折叠状态下也要输出
 	msg := fmt.Sprintf(format, args...)
@@ -219,9 +224,10 @@ func (cg *ConsoleGroup) ErrorContext(ctx context.Context, format string, args ..
 // 类似 JavaScript console.table()
 func (cg *ConsoleGroup) Table(data interface{}) {
 	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
+
 	indent := cg.getIndent()
 	isCollapsed := cg.isInCollapsedGroup()
-	cg.mutex.Unlock()
 
 	if isCollapsed {
 		return // 折叠状态下不显示表格
@@ -240,6 +246,8 @@ func (cg *ConsoleGroup) Table(data interface{}) {
 // Time 开始计时
 // 类似 JavaScript console.time()
 func (cg *ConsoleGroup) Time(label string) *Timer {
+	cg.mutex.Lock()
+	defer cg.mutex.Unlock()
 	return NewTimer(cg.output, label, cg.indentLevel)
 }
 
@@ -457,7 +465,9 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 				sb.WriteString(displayCell)
 				sb.WriteString(strings.Repeat(" ", paddingWidth+1))
 			} else {
-				sb.WriteString(" " + cell + " ")
+				sb.WriteString(" ")
+				sb.WriteString(cell)
+				sb.WriteString(" ")
 			}
 			sb.WriteString("│")
 		}

@@ -50,10 +50,15 @@ func newWriterStats() *writerStats {
 }
 
 // addBytes 增加字节统计（使用 atomic 快速更新）
+// lastWrite 仅用于可观测性，无需纳秒级精度：首次写入必定更新，
+// 后续每 64 次写入更新一次，减少 time.Now() 系统调用和原子写开销
 func (ws *writerStats) addBytes(bytes int64) {
 	atomic.AddInt64(&ws.bytesWritten, bytes)
-	atomic.AddInt64(&ws.linesWritten, 1)
-	atomic.StoreInt64(&ws.lastWrite, time.Now().UnixNano())
+	// 复用 linesWritten 计数结果作为更新触发条件，避免额外原子读
+	n := atomic.AddInt64(&ws.linesWritten, 1)
+	if n == 1 || n&63 == 0 {
+		atomic.StoreInt64(&ws.lastWrite, time.Now().UnixNano())
+	}
 }
 
 // addError 增加错误统计（使用 atomic 快速更新）

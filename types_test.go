@@ -275,10 +275,10 @@ func (s *TypesTestSuite) TestLoggerDefaultValues() {
 	logger := NewLogger()
 
 	assert.Equal(s.T(), DEBUG, logger.level)
-	assert.False(s.T(), logger.showCaller)
+	assert.True(s.T(), logger.showCaller)
 	assert.True(s.T(), logger.colorful)
 	assert.Equal(s.T(), "", logger.prefix)
-	assert.Equal(s.T(), time.DateTime, logger.timeFormat)
+	assert.Equal(s.T(), time.RFC3339Nano, logger.timeFormat)
 	assert.Equal(s.T(), FormatJSON, logger.format)
 	assert.Equal(s.T(), 2, logger.callerDepth)
 	assert.False(s.T(), logger.showStacktrace)

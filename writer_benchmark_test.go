@@ -248,25 +248,6 @@ func createTestFile(t *testing.T, name string) string {
 	return filepath.Join(tmpDir, name)
 }
 
-// 辅助函数：验证文件内容
-func verifyFileContent(t *testing.T, filePath string, expectedLines int) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		t.Fatalf("读取文件失败: %v", err)
-	}
-
-	lines := 0
-	for _, b := range data {
-		if b == '\n' {
-			lines++
-		}
-	}
-
-	if lines != expectedLines {
-		t.Errorf("期望 %d 行，实际 %d 行", expectedLines, lines)
-	}
-}
-
 // ==================== 功能正确性测试 ====================
 
 func TestWriters_Correctness(t *testing.T) {

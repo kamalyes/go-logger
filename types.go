@@ -165,10 +165,10 @@ func (s *LoggerStats) GetStats() *LoggerStats {
 func NewLogger() *Logger {
 	return &Logger{
 		level:          DEBUG,
-		showCaller:     false,
+		showCaller:     true,
 		colorful:       true,
 		prefix:         "",
-		timeFormat:     time.DateTime,
+		timeFormat:     time.RFC3339Nano,
 		format:         FormatJSON,
 		callerDepth:    2,
 		showStacktrace: false,

@@ -25,12 +25,12 @@ import (
 type ConsoleTestSuite struct {
 	suite.Suite
 	logger *Logger
-	buffer *bytes.Buffer
+	buffer *safeBuffer
 }
 
 // SetupTest 每个测试前的设置
 func (s *ConsoleTestSuite) SetupTest() {
-	s.buffer = &bytes.Buffer{}
+	s.buffer = &safeBuffer{}
 	s.logger = NewLogger().
 		WithOutput(s.buffer).
 		WithLevel(DEBUG).

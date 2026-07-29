@@ -13,7 +13,6 @@ package logger
 import (
 	"context"
 
-	"github.com/kamalyes/go-toolbox/pkg/convert"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/metadata"
 )
@@ -62,7 +61,7 @@ func compileContextKeys(keys []string) []compiledContextKey {
 	for _, key := range keys {
 		compiled = append(compiled, compiledContextKey{
 			key:      key,
-			keyBytes: convert.S2B(key),
+			keyBytes: []byte(key),
 		})
 	}
 
@@ -126,9 +125,9 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 	otelTraceID := extractOTelTraceID(ctx)
 	traceIDWritten := false
 	if otelTraceID != "" {
-		buf = append(buf, convert.S2B(ContextKeyTraceID)...)
+		buf = append(buf, ContextKeyTraceID...)
 		buf = append(buf, '=')
-		buf = append(buf, convert.S2B(otelTraceID)...)
+		buf = append(buf, otelTraceID...)
 		wroteField = true
 		traceIDWritten = true
 	}
@@ -147,7 +146,7 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 		}
 		buf = append(buf, key.keyBytes...)
 		buf = append(buf, '=')
-		buf = append(buf, convert.S2B(value)...)
+		buf = append(buf, value...)
 		wroteField = true
 	}
 

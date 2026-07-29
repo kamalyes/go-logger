@@ -30,8 +30,8 @@ import (
 // ============================================================================
 
 const (
-	maxLogMessageSize    = 1024 // 单条日志消息的最大预分配大小
-	estimatedContextSize = 100  // 预估的上下文信息大小（TraceID 等）
+	maxLogMessageSize    = 2048 // 单条日志消息的最大预分配大小（适应带 caller 的 JSON 日志）
+	estimatedContextSize = 128  // 预估的上下文信息大小（TraceID 等）
 )
 
 // 字节池 - 用于日志消息构建
@@ -45,13 +45,6 @@ var bytePool = sync.Pool{
 var contextPool = sync.Pool{
 	New: func() any {
 		return make([]byte, 0, estimatedContextSize)
-	},
-}
-
-// fieldMap 池 - 用于 fieldLogger 的 map 复用
-var fieldMapPool = sync.Pool{
-	New: func() any {
-		return make(map[string]any, 8) // 预分配常见大小
 	},
 }
 
@@ -120,7 +113,52 @@ func New() *Logger {
 	return NewLogger()
 }
 
+// appendTextHeader 将时间戳、前缀、级别前缀、调用者信息追加到 buf
+// 供带 fields/KV 的文本模式条目构建器共享，避免重复代码
+// 注意：此函数成本较高无法内联，故 ultraLog 的纯文本路径保留内联实现以减少调用开销
+func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
+	// 添加时间戳
+	buf = time.Now().AppendFormat(buf, l.timeFormat)
+
+	// 添加前缀（如果有）
+	if l.prefix != "" {
+		buf = append(buf, l.prefix...)
+	}
+
+	// 添加级别前缀
+	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
+	buf = append(buf, prefix...)
+
+	// 添加调用者信息（如果需要）
+	if l.showCaller {
+		if file, line, funcName := l.findExternalCaller(); file != "" {
+			buf = append(buf, '[')
+			buf = append(buf, file...)
+			buf = append(buf, ':')
+			buf = stringx.FastAppendInt(buf, line)
+			buf = append(buf, ':')
+			buf = append(buf, funcName...)
+			buf = append(buf, ']', ' ')
+		}
+	}
+	return buf
+}
+
+// writeTextBufLocked 将已构建好的文本条目缓冲区（含 header 与消息内容，不含换行）
+// 追加换行后加锁写入并处理 FATAL 退出。所有文本模式日志方法共享此逻辑。
+// 设计为可内联（成本远低于内联预算），避免调用开销。
+func (l *Logger) writeTextBufLocked(level LogLevel, buf []byte) {
+	buf = append(buf, newline...)
+	l.mu.Lock()
+	l.output.Write(buf)
+	l.mu.Unlock()
+	if level == FATAL {
+		os.Exit(1)
+	}
+}
+
 // ultraLog 极致优化的日志方法（使用字节池和零拷贝）
+// 纯文本路径保留内联实现以避免 appendTextHeader 无法内联带来的额外调用开销
 func (l *Logger) ultraLog(level LogLevel, msg string) {
 	if level < l.level {
 		return
@@ -132,47 +170,39 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 		return
 	}
 
+	// 文本路径：内联构建完整条目
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
 	defer bytePool.Put(buf)
 
 	// 添加时间戳
-	buf = stringx.FastFormatTime(buf, time.Now())
+	buf = time.Now().AppendFormat(buf, l.timeFormat)
 
 	// 添加前缀（如果有）
 	if l.prefix != "" {
-		buf = append(buf, convert.S2B(l.prefix)...)
+		buf = append(buf, l.prefix...)
 	}
 
 	// 添加级别前缀
 	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
 	buf = append(buf, prefix...)
 
-	// 添加调用者信息（如果需要）- 复用 findExternalCaller 保证跨平台和调用栈准确性
+	// 添加调用者信息（如果需要）
 	if l.showCaller {
 		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, '[')
-			buf = append(buf, convert.S2B(file)...)
+			buf = append(buf, file...)
 			buf = append(buf, ':')
 			buf = stringx.FastAppendInt(buf, line)
 			buf = append(buf, ':')
-			buf = append(buf, convert.S2B(funcName)...)
+			buf = append(buf, funcName...)
 			buf = append(buf, ']', ' ')
 		}
 	}
 
 	// 添加消息
-	buf = append(buf, convert.S2B(msg)...)
-	buf = append(buf, newline...)
-
-	// 写入输出
-	l.mu.Lock()
-	l.output.Write(buf)
-	l.mu.Unlock()
-
-	if level == FATAL {
-		os.Exit(1)
-	}
+	buf = append(buf, msg...)
+	l.writeTextBufLocked(level, buf)
 }
 
 // writeJSONEntry 输出 JSON 格式日志条目
@@ -189,14 +219,14 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	// timestamp
 	buf = appendJSONKey(buf, l.timestampKey)
 	buf = append(buf, '"')
-	buf = stringx.FastFormatTime(buf, time.Now())
+	buf = time.Now().AppendFormat(buf, l.timeFormat)
 	buf = append(buf, '"')
 
 	// level
 	buf = append(buf, ',')
 	buf = appendJSONKey(buf, l.levelKey)
 	buf = append(buf, '"')
-	buf = append(buf, convert.S2B(level.String())...)
+	buf = append(buf, level.String()...)
 	buf = append(buf, '"')
 
 	// prefix（如果有）
@@ -216,7 +246,11 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, l.callerKey)
-			buf = appendJSONString(buf, fmt.Sprintf("%s:%d", file, line))
+			buf = append(buf, '"')
+			buf = appendJSONStringContent(buf, file)
+			buf = append(buf, ':')
+			buf = strconv.AppendInt(buf, int64(line), 10)
+			buf = append(buf, '"')
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, "callerfunc")
 			buf = appendJSONString(buf, funcName)
@@ -242,7 +276,8 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 }
 
 // ultraLogWithFields 带额外 fields 的日志方法
-// JSON 模式下 fields 作为 JSON 顶层字段输出；text 模式下 fields 拼接到 msg 后调用 ultraLog
+// JSON 模式下 fields 作为 JSON 顶层字段输出；text 模式下 fields 拼接到 msg 后
+// 在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[string]any) {
 	if level < l.level {
 		return
@@ -253,7 +288,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		return
 	}
 
-	// text 模式：保持原 logWithFields 的拼接格式
+	// text 模式：无 fields 时直接走纯文本路径
 	if len(fields) == 0 {
 		l.ultraLog(level, msg)
 		return
@@ -263,7 +298,8 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	buf = buf[:0]
 	defer bytePool.Put(buf)
 
-	buf = append(buf, convert.S2B(msg)...)
+	buf = l.appendTextHeader(buf, level)
+	buf = append(buf, msg...)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -271,14 +307,14 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
-		buf = append(buf, convert.S2B(k)...)
+		buf = append(buf, k...)
 		buf = append(buf, kvSeparator...)
 		buf = convert.AppendValue(buf, v)
 		first = false
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.ultraLog(level, string(buf))
+	l.writeTextBufLocked(level, buf)
 }
 
 // extractContextFields 从上下文提取信息为 map（用于 JSON 输出）
@@ -301,14 +337,13 @@ func (l *Logger) extractContextFields(ctx context.Context) map[string]any {
 // appendJSONKey 追加 JSON 键（假设 key 是简单 ASCII 字符串，无需转义）
 func appendJSONKey(buf []byte, key string) []byte {
 	buf = append(buf, '"')
-	buf = append(buf, convert.S2B(key)...)
+	buf = append(buf, key...)
 	buf = append(buf, '"', ':')
 	return buf
 }
 
-// appendJSONString 追加 JSON 字符串值（带转义处理）
-func appendJSONString(buf []byte, s string) []byte {
-	buf = append(buf, '"')
+// appendJSONStringContent 追加 JSON 字符串内容（不带引号，带转义处理）
+func appendJSONStringContent(buf []byte, s string) []byte {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch c {
@@ -335,6 +370,13 @@ func appendJSONString(buf []byte, s string) []byte {
 			}
 		}
 	}
+	return buf
+}
+
+// appendJSONString 追加 JSON 字符串值（带引号和转义处理）
+func appendJSONString(buf []byte, s string) []byte {
+	buf = append(buf, '"')
+	buf = appendJSONStringContent(buf, s)
 	buf = append(buf, '"')
 	return buf
 }
@@ -384,44 +426,84 @@ func appendJSONValue(buf []byte, v any) []byte {
 // hexChars 用于 JSON unicode 转义
 var hexChars = []byte("0123456789abcdef")
 
+// callerInfo 缓存的调用者信息，按 PC 索引
+type callerInfo struct {
+	file     string
+	line     int
+	funcName string
+}
+
+// callerCache 按调用者 PC 缓存调用者信息
+// 同一调用点的 PC 固定不变，首次遍历栈后缓存，后续调用零分配命中缓存
+var callerCache sync.Map
+
 // findExternalCaller 回溯调用栈，找到第一个不在 go-logger/reflect/testing/runtime 内的调用者
-// 用函数名判断（跨平台稳定），不依赖文件路径分隔符
+// 优化策略：
+//  1. 用 runtime.Callers 一次性获取所有 PC（替代循环 runtime.Caller）
+//  2. 用文件路径判断内部调用者（避免 runtime.FuncForPC().Name() 的字符串分配）
+//  3. 仅对外部调用者调用 .Name()（从 2-3 次分配降至 1 次）
+//  4. 按 PC 缓存结果（热路径零分配）
 func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
-	for depth := 2; depth < 20; depth++ {
-		pc, f, ln, ok := runtime.Caller(depth)
-		if !ok {
-			break
+	// 栈上数组，无需 Pool，无堆分配
+	var pcs [32]uintptr
+	n := runtime.Callers(3, pcs[:])
+
+	for i := 0; i < n; i++ {
+		pc := pcs[i]
+
+		// 快速路径：缓存命中（sync.Map.Load 无分配）
+		if cached, ok := callerCache.Load(pc); ok {
+			ci := cached.(*callerInfo)
+			return ci.file, ci.line, ci.funcName
 		}
-		fn := runtime.FuncForPC(pc).Name()
-		if isInternalCaller(fn, f) {
+
+		// 未缓存：获取 *Func（无分配），用 FileLine 拿文件路径（无字符串分配）
+		fn := runtime.FuncForPC(pc)
+		if fn == nil {
 			continue
 		}
-		// 简化文件名：兼容 Windows 反斜杠和 Unix 正斜杠
-		if idx := strings.LastIndexAny(f, `/\`); idx != -1 {
-			f = f[idx+1:]
+		f, ln := fn.FileLine(pc)
+
+		// 用文件路径判断是否内部调用（无字符串分配）
+		if isInternalCallerByFile(f) {
+			continue
 		}
-		return f, ln, fn
+
+		// 找到外部调用者：此处是唯一需要分配的地方（首次调用，后续命中缓存）
+		name := fn.Name()
+		// 统一路径分隔符为正斜杠，保留完整路径以便 IDE 点击跳转
+		if strings.ContainsRune(f, '\\') {
+			f = strings.ReplaceAll(f, `\`, `/`)
+		}
+
+		// 缓存结果（每个调用点只分配一次）
+		ci := &callerInfo{file: f, line: ln, funcName: name}
+		callerCache.Store(pc, ci)
+		return f, ln, name
 	}
 	return "", 0, ""
 }
 
-// isInternalCaller 根据函数名和文件名判断是否为需要跳过的内部调用
+// isInternalCallerByFile 根据文件路径判断是否为需要跳过的内部调用
+// 仅使用文件路径（无需函数名），避免 runtime.FuncForPC().Name() 的字符串分配
 // 跳过 go-logger 自身、reflect 反射、testing 框架、runtime 内部
 // 注意：_test.go 文件即使属于 go-logger 包也不跳过（测试代码本身就是调用者）
-func isInternalCaller(funcName, file string) bool {
+func isInternalCallerByFile(file string) bool {
 	if strings.HasSuffix(file, "_test.go") {
 		return false
 	}
-	if strings.Contains(funcName, "kamalyes/go-logger") {
+	// 检查 go-logger 包（跨平台：同时检查正斜杠和反斜杠）
+	if strings.Contains(file, `/go-logger/`) || strings.Contains(file, `\go-logger\`) {
 		return true
 	}
-	if strings.HasPrefix(funcName, "reflect.") {
+	// 检查 Go 标准库 runtime/reflect/testing
+	if strings.Contains(file, `/src/runtime/`) || strings.Contains(file, `\src\runtime\`) {
 		return true
 	}
-	if strings.HasPrefix(funcName, "testing.") {
+	if strings.Contains(file, `/src/reflect/`) || strings.Contains(file, `\src\reflect\`) {
 		return true
 	}
-	if strings.HasPrefix(funcName, "runtime.") {
+	if strings.Contains(file, `/src/testing/`) || strings.Contains(file, `\src\testing\`) {
 		return true
 	}
 	return false
@@ -708,12 +790,13 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		return
 	}
 
-	// 快速构建带键值对的消息
+	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
 	defer bytePool.Put(buf)
 
-	buf = append(buf, convert.S2B(msg)...)
+	buf = l.appendTextHeader(buf, level)
+	buf = append(buf, msg...)
 	buf = append(buf, kvBraceOpen...)
 
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -734,7 +817,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.ultraLog(level, string(buf))
+	l.writeTextBufLocked(level, buf)
 }
 
 // kvToFields 将键值对切片转为 map[string]any
@@ -775,11 +858,13 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 		return
 	}
 
+	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
 	defer bytePool.Put(buf)
 
-	buf = append(buf, convert.S2B(msg)...)
+	buf = l.appendTextHeader(buf, level)
+	buf = append(buf, msg...)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -787,14 +872,14 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
-		buf = append(buf, convert.S2B(k)...)
+		buf = append(buf, k...)
 		buf = append(buf, kvSeparator...)
 		buf = convert.AppendValue(buf, v)
 		first = false
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.ultraLog(level, string(buf))
+	l.writeTextBufLocked(level, buf)
 }
 
 // logWithContextKV 带上下文的键值对日志
@@ -1530,12 +1615,10 @@ func (f *fieldLogger) IsLevelEnabled(level LogLevel) bool {
 	return f.logger.IsLevelEnabled(level)
 }
 
-// 结构化日志构建器 - 使用 clear() 优化（Go 1.21+）
+// 结构化日志构建器
 func (f *fieldLogger) WithField(key string, value any) ILogger {
-	// 从对象池获取 map
-	newFields := fieldMapPool.Get().(map[string]any)
-
-	clear(newFields)
+	// 按实际所需容量分配 map，避免过度预分配
+	newFields := make(map[string]any, len(f.fields)+1)
 
 	// 复制现有字段
 	for k, v := range f.fields {
@@ -1551,10 +1634,8 @@ func (f *fieldLogger) WithFields(fields map[string]any) ILogger {
 		return f
 	}
 
-	// 从对象池获取 map
-	newFields := fieldMapPool.Get().(map[string]any)
-
-	clear(newFields)
+	// 按实际所需容量分配 map
+	newFields := make(map[string]any, len(f.fields)+len(fields))
 
 	// 复制现有字段
 	for k, v := range f.fields {
@@ -1712,15 +1793,14 @@ func (f *fieldLogger) mergeKV(keysAndValues ...any) []any {
 	return result
 }
 
-// 辅助方法：合并字段映射 - 使用对象池优化
+// 辅助方法：合并字段映射
 func (f *fieldLogger) mergeFieldsMap(fields map[string]any) map[string]any {
 	if len(fields) == 0 {
 		return f.fields
 	}
 
-	// 从对象池获取 map
-	merged := fieldMapPool.Get().(map[string]any)
-	clear(merged)
+	// 按实际所需容量分配 map
+	merged := make(map[string]any, len(f.fields)+len(fields))
 
 	// 添加现有字段
 	for k, v := range f.fields {
@@ -1764,8 +1844,43 @@ func (l *Logger) logSpecial(logType SpecialLogType, level LogLevel, format strin
 	if level < l.level {
 		return
 	}
-	message := fmt.Sprintf(format, args...)
-	l.ultraLog(level, fmt.Sprintf("%s [%s] %s", logType.emoji, logType.name, message))
+
+	// JSON 模式：emoji+name 作为 message 的一部分输出（需 string 转换）
+	if l.format == FormatJSON {
+		msgBuf := bytePool.Get().([]byte)
+		msgBuf = msgBuf[:0]
+		msgBuf = append(msgBuf, logType.emoji...)
+		msgBuf = append(msgBuf, ' ', '[')
+		msgBuf = append(msgBuf, logType.name...)
+		msgBuf = append(msgBuf, ']', ' ')
+		if len(args) == 0 {
+			msgBuf = append(msgBuf, format...)
+		} else {
+			msgBuf = append(msgBuf, fmt.Sprintf(format, args...)...)
+		}
+		// string(msgBuf) 会复制字节，复制后即可归还 msgBuf
+		l.writeJSONEntry(level, string(msgBuf), nil)
+		bytePool.Put(msgBuf)
+		return
+	}
+
+	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
+	buf := bytePool.Get().([]byte)
+	buf = buf[:0]
+	defer bytePool.Put(buf)
+
+	buf = l.appendTextHeader(buf, level)
+	buf = append(buf, logType.emoji...)
+	buf = append(buf, ' ', '[')
+	buf = append(buf, logType.name...)
+	buf = append(buf, ']', ' ')
+
+	if len(args) == 0 {
+		buf = append(buf, format...)
+	} else {
+		buf = append(buf, fmt.Sprintf(format, args...)...)
+	}
+	l.writeTextBufLocked(level, buf)
 }
 
 // Success 成功日志（INFO 级别）
