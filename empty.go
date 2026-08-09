@@ -143,6 +143,9 @@ func (e *EmptyLogger) LogContext(ctx context.Context, level LogLevel, msg string
 func (e *EmptyLogger) LogKV(level LogLevel, msg string, keysAndValues ...interface{})          {}
 func (e *EmptyLogger) LogWithFields(level LogLevel, msg string, fields map[string]interface{}) {}
 
+// 特殊类型日志方法（空实现）
+func (e *EmptyLogger) LogSpecialContext(ctx context.Context, logType SpecialLogType, level LogLevel, format string, args ...interface{}) {}
+
 // 配置方法
 func (e *EmptyLogger) SetLevel(level LogLevel) {
 	e.level = level

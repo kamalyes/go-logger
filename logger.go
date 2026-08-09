@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/kamalyes/go-toolbox/pkg/convert"
-	"github.com/kamalyes/go-toolbox/pkg/mathx"
 	"github.com/kamalyes/go-toolbox/pkg/stringx"
 )
 
@@ -30,7 +29,7 @@ import (
 // ============================================================================
 
 const (
-	maxLogMessageSize    = 2048 // 单条日志消息的最大预分配大小（适应带 caller 的 JSON 日志）
+	maxLogMessageSize    = 4096 // 单条日志消息的最大预分配大小（适应带 caller 的 JSON 日志）
 	estimatedContextSize = 128  // 预估的上下文信息大小（TraceID 等）
 )
 
@@ -72,8 +71,10 @@ var (
 	kvMissing    = []byte("<missing>")
 )
 
+// 使用数组替代 map，O(1) 直接索引（避免哈希计算）
+// 仅覆盖基础级别 0-4（DEBUG/INFO/WARN/ERROR/FATAL），其他级别前缀为 nil
 var (
-	levelPrefixes = map[LogLevel][]byte{
+	levelPrefixesArr = [5][]byte{
 		DEBUG: debugPrefix,
 		INFO:  infoPrefix,
 		WARN:  warnPrefix,
@@ -81,7 +82,7 @@ var (
 		FATAL: fatalPrefix,
 	}
 
-	levelPrefixesColor = map[LogLevel][]byte{
+	levelPrefixesColorArr = [5][]byte{
 		DEBUG: debugPrefixColor,
 		INFO:  infoPrefixColor,
 		WARN:  warnPrefixColor,
@@ -89,6 +90,37 @@ var (
 		FATAL: fatalPrefixColor,
 	}
 )
+
+// getLevelPrefix 根据级别和颜色配置获取前缀
+// 内联友好：避免 mathx.IF 的双 map 查找，用数组直接索引
+func (l *Logger) getLevelPrefix(level LogLevel) []byte {
+	idx := int(level)
+	if idx < 0 || idx >= len(levelPrefixesArr) {
+		return nil
+	}
+	if l.colorful {
+		return levelPrefixesColorArr[idx]
+	}
+	return levelPrefixesArr[idx]
+}
+
+// levelNames 基础级别名称数组，用于 JSON 路径快速查找（避免 level.String() 的 map 查找）
+var levelNames = [5]string{
+	DEBUG: "DEBUG",
+	INFO:  "INFO",
+	WARN:  "WARN",
+	ERROR: "ERROR",
+	FATAL: "FATAL",
+}
+
+// getLevelName 快速获取级别名称
+func getLevelName(level LogLevel) string {
+	idx := int(level)
+	if idx >= 0 && idx < len(levelNames) {
+		return levelNames[idx]
+	}
+	return level.String()
+}
 
 // ============================================================================
 // 上下文提取器
@@ -126,11 +158,10 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 	}
 
 	// 添加级别前缀
-	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
-	buf = append(buf, prefix...)
+	buf = append(buf, l.getLevelPrefix(level)...)
 
 	// 添加调用者信息（如果需要）
-	if l.showCaller {
+	if l.showCaller.Load() {
 		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, '[')
 			buf = append(buf, file...)
@@ -160,7 +191,7 @@ func (l *Logger) writeTextBufLocked(level LogLevel, buf []byte) {
 // ultraLog 极致优化的日志方法（使用字节池和零拷贝）
 // 纯文本路径保留内联实现以避免 appendTextHeader 无法内联带来的额外调用开销
 func (l *Logger) ultraLog(level LogLevel, msg string) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -184,11 +215,10 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	}
 
 	// 添加级别前缀
-	prefix := mathx.IF(l.colorful, levelPrefixesColor[level], levelPrefixes[level])
-	buf = append(buf, prefix...)
+	buf = append(buf, l.getLevelPrefix(level)...)
 
 	// 添加调用者信息（如果需要）
-	if l.showCaller {
+	if l.showCaller.Load() {
 		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, '[')
 			buf = append(buf, file...)
@@ -226,7 +256,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	buf = append(buf, ',')
 	buf = appendJSONKey(buf, l.levelKey)
 	buf = append(buf, '"')
-	buf = append(buf, level.String()...)
+	buf = append(buf, getLevelName(level)...)
 	buf = append(buf, '"')
 
 	// prefix（如果有）
@@ -242,7 +272,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	buf = appendJSONString(buf, msg)
 
 	// caller（如果启用）- 用循环回溯找到第一个 go-logger 包外的调用者
-	if l.showCaller {
+	if l.showCaller.Load() {
 		if file, line, funcName := l.findExternalCaller(); file != "" {
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, l.callerKey)
@@ -279,7 +309,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 // JSON 模式下 fields 作为 JSON 顶层字段输出；text 模式下 fields 拼接到 msg 后
 // 在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[string]any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -512,7 +542,7 @@ func isInternalCallerByFile(file string) bool {
 // logWithContextFormat 是 *Context 系列方法的公共实现
 // 统一处理 level 检查、JSON/text 模式分支、traceId 提取
 func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, format string, args ...any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -529,7 +559,7 @@ func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, forma
 
 // ultraLogf 极致优化的格式化日志方法
 func (l *Logger) ultraLogf(level LogLevel, format string, args ...any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -551,7 +581,7 @@ func (l *Logger) log(level LogLevel, format string, args ...any) {
 
 // Debug 调试日志
 func (l *Logger) Debug(format string, args ...any) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.ultraLogf(DEBUG, format, args...)
@@ -559,7 +589,7 @@ func (l *Logger) Debug(format string, args ...any) {
 
 // Info 信息日志
 func (l *Logger) Info(format string, args ...any) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.ultraLogf(INFO, format, args...)
@@ -567,7 +597,7 @@ func (l *Logger) Info(format string, args ...any) {
 
 // Warn 警告日志
 func (l *Logger) Warn(format string, args ...any) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.ultraLogf(WARN, format, args...)
@@ -575,7 +605,7 @@ func (l *Logger) Warn(format string, args ...any) {
 
 // Error 错误日志
 func (l *Logger) Error(format string, args ...any) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.ultraLogf(ERROR, format, args...)
@@ -588,28 +618,28 @@ func (l *Logger) Fatal(format string, args ...any) {
 
 // Printf风格方法（与上面相同，但命名更明确）
 func (l *Logger) Debugf(format string, args ...any) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.ultraLogf(DEBUG, format, args...)
 }
 
 func (l *Logger) Infof(format string, args ...any) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.ultraLogf(INFO, format, args...)
 }
 
 func (l *Logger) Warnf(format string, args ...any) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.ultraLogf(WARN, format, args...)
 }
 
 func (l *Logger) Errorf(format string, args ...any) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.ultraLogf(ERROR, format, args...)
@@ -650,28 +680,28 @@ func (l *Logger) WithError(err error) ILogger {
 
 // 纯文本日志方法
 func (l *Logger) DebugMsg(msg string) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.ultraLog(DEBUG, msg)
 }
 
 func (l *Logger) InfoMsg(msg string) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.ultraLog(INFO, msg)
 }
 
 func (l *Logger) WarnMsg(msg string) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.ultraLog(WARN, msg)
 }
 
 func (l *Logger) ErrorMsg(msg string) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.ultraLog(ERROR, msg)
@@ -683,7 +713,7 @@ func (l *Logger) FatalMsg(msg string) {
 
 // 多行日志方法 - 自动处理换行符
 func (l *Logger) InfoLines(lines ...string) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	for _, line := range lines {
@@ -692,7 +722,7 @@ func (l *Logger) InfoLines(lines ...string) {
 }
 
 func (l *Logger) ErrorLines(lines ...string) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	for _, line := range lines {
@@ -701,7 +731,7 @@ func (l *Logger) ErrorLines(lines ...string) {
 }
 
 func (l *Logger) WarnLines(lines ...string) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	for _, line := range lines {
@@ -710,7 +740,7 @@ func (l *Logger) WarnLines(lines ...string) {
 }
 
 func (l *Logger) DebugLines(lines ...string) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	for _, line := range lines {
@@ -766,7 +796,7 @@ func (l *Logger) FatalContext(ctx context.Context, format string, args ...any) {
 
 // logWithKV 极简键值对实现 - 零分配优化
 func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -843,7 +873,7 @@ func kvToFields(keysAndValues []any) map[string]any {
 
 // logWithFields 使用字段映射记录日志
 func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -884,7 +914,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 
 // logWithContextKV 带上下文的键值对日志
 func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg string, keysAndValues ...any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
@@ -921,56 +951,56 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 
 // 结构化日志方法（键值对）
 func (l *Logger) DebugKV(msg string, keysAndValues ...any) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.logWithKV(DEBUG, msg, keysAndValues...)
 }
 
 func (l *Logger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...any) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.logWithContextKV(ctx, DEBUG, msg, keysAndValues...)
 }
 
 func (l *Logger) InfoKV(msg string, keysAndValues ...any) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.logWithKV(INFO, msg, keysAndValues...)
 }
 
 func (l *Logger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...any) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.logWithContextKV(ctx, INFO, msg, keysAndValues...)
 }
 
 func (l *Logger) WarnKV(msg string, keysAndValues ...any) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.logWithKV(WARN, msg, keysAndValues...)
 }
 
 func (l *Logger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...any) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.logWithContextKV(ctx, WARN, msg, keysAndValues...)
 }
 
 func (l *Logger) ErrorKV(msg string, keysAndValues ...any) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.logWithKV(ERROR, msg, keysAndValues...)
 }
 
 func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...any) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.logWithContextKV(ctx, ERROR, msg, keysAndValues...)
@@ -986,28 +1016,28 @@ func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues .
 
 // 字段映射方法（直接支持 map[string]any）
 func (l *Logger) DebugWithFields(msg string, fields map[string]any) {
-	if l.level > DEBUG {
+	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
 	l.logWithFields(DEBUG, msg, fields)
 }
 
 func (l *Logger) InfoWithFields(msg string, fields map[string]any) {
-	if l.level > INFO {
+	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
 	l.logWithFields(INFO, msg, fields)
 }
 
 func (l *Logger) WarnWithFields(msg string, fields map[string]any) {
-	if l.level > WARN {
+	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
 	l.logWithFields(WARN, msg, fields)
 }
 
 func (l *Logger) ErrorWithFields(msg string, fields map[string]any) {
-	if l.level > ERROR {
+	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
 	l.logWithFields(ERROR, msg, fields)
@@ -1019,14 +1049,14 @@ func (l *Logger) FatalWithFields(msg string, fields map[string]any) {
 
 // 原始日志条目方法
 func (l *Logger) Log(level LogLevel, msg string) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 	l.ultraLog(level, msg)
 }
 
 func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 	// JSON 模式：traceId 作为 JSON 顶层字段
@@ -1042,14 +1072,14 @@ func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
 }
 
 func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 	l.logWithKV(level, msg, keysAndValues...)
 }
 
 func (l *Logger) LogWithFields(level LogLevel, msg string, fields map[string]any) {
-	if level < l.level {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
 	l.logWithFields(level, msg, fields)
@@ -1208,17 +1238,17 @@ func (l *Logger) ConsoleTime(label string) *Timer {
 
 // SetLevel 设置日志级别
 func (l *Logger) SetLevel(level LogLevel) {
-	l.level = level
+	l.level.Store(int32(level))
 }
 
 // GetLevel 获取当前日志级别
 func (l *Logger) GetLevel() LogLevel {
-	return l.level
+	return LogLevel(l.level.Load())
 }
 
 // SetShowCaller 设置是否显示调用者信息
 func (l *Logger) SetShowCaller(show bool) {
-	l.showCaller = show
+	l.showCaller.Store(show)
 }
 
 // ============================================================================
@@ -1313,7 +1343,7 @@ func (f *fieldLogger) Fatalf(format string, args ...any) {
 
 // 纯文本日志方法
 func (f *fieldLogger) DebugMsg(msg string) {
-	if f.logger.level > DEBUG {
+	if LogLevel(f.logger.level.Load()) > DEBUG {
 		return
 	}
 	f.logger.logWithFields(DEBUG, msg, f.fields)
@@ -1404,7 +1434,7 @@ func (f *fieldLogger) mergeContextFields(ctx context.Context) map[string]any {
 // logWithContextFieldsFormat 是 fieldLogger.*Context 系列方法的公共实现
 // 统一处理 level 检查、JSON/text 模式分支、traceId + f.fields 合并
 func (f *fieldLogger) logWithContextFieldsFormat(ctx context.Context, level LogLevel, format string, args ...any) {
-	if level < f.logger.level {
+	if level < LogLevel(f.logger.level.Load()) {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)
@@ -1592,6 +1622,31 @@ func (f *fieldLogger) LogWithFields(level LogLevel, msg string, fields map[strin
 	}
 	mergedFields := f.mergeFieldsMap(fields)
 	f.logger.logWithFields(level, msg, mergedFields)
+}
+
+// LogSpecialContext 委托给底层 Logger，并合并 fieldLogger 的字段
+func (f *fieldLogger) LogSpecialContext(ctx context.Context, logType SpecialLogType, level LogLevel, format string, args ...any) {
+	if !f.logger.IsLevelEnabled(level) {
+		return
+	}
+	// 构建消息：emoji [NAME] format
+	msg := logType.emoji + " [" + logType.name + "] "
+	if len(args) == 0 {
+		msg += format
+	} else {
+		msg += fmt.Sprintf(format, args...)
+	}
+	// JSON 模式：traceId 和 f.fields 都作为 JSON 顶层字段
+	if f.logger.format == FormatJSON {
+		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
+		return
+	}
+	// text 模式：ctx 信息前缀
+	contextInfo := f.logger.extractContextInfo(ctx)
+	if contextInfo != "" {
+		msg = contextInfo + msg
+	}
+	f.logger.logWithFields(level, msg, f.fields)
 }
 
 // 配置方法
@@ -1839,48 +1894,49 @@ var (
 	EnvironmentType = SpecialLogType{"🌍", "ENV"}
 )
 
-// logSpecial 记录特殊类型的日志（使用 INFO 级别）
-func (l *Logger) logSpecial(logType SpecialLogType, level LogLevel, format string, args ...any) {
-	if level < l.level {
-		return
-	}
-
-	// JSON 模式：emoji+name 作为 message 的一部分输出（需 string 转换）
-	if l.format == FormatJSON {
-		msgBuf := bytePool.Get().([]byte)
-		msgBuf = msgBuf[:0]
-		msgBuf = append(msgBuf, logType.emoji...)
-		msgBuf = append(msgBuf, ' ', '[')
-		msgBuf = append(msgBuf, logType.name...)
-		msgBuf = append(msgBuf, ']', ' ')
-		if len(args) == 0 {
-			msgBuf = append(msgBuf, format...)
-		} else {
-			msgBuf = append(msgBuf, fmt.Sprintf(format, args...)...)
-		}
-		// string(msgBuf) 会复制字节，复制后即可归还 msgBuf
-		l.writeJSONEntry(level, string(msgBuf), nil)
-		bytePool.Put(msgBuf)
-		return
-	}
-
-	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
+// buildSpecialMessage 构建特殊日志消息内容：emoji [NAME] format
+// 返回池化 buffer，调用方负责归还 bytePool
+func buildSpecialMessage(emoji, name, format string, args ...any) []byte {
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
-
-	buf = l.appendTextHeader(buf, level)
-	buf = append(buf, logType.emoji...)
+	buf = append(buf, emoji...)
 	buf = append(buf, ' ', '[')
-	buf = append(buf, logType.name...)
+	buf = append(buf, name...)
 	buf = append(buf, ']', ' ')
-
 	if len(args) == 0 {
 		buf = append(buf, format...)
 	} else {
 		buf = append(buf, fmt.Sprintf(format, args...)...)
 	}
+	return buf
+}
+
+// logSpecialInternal 特殊日志内部实现（无 context）
+// 所有特殊日志方法（logSpecial/Performance/Progress/Milestone/Health/Audit）的公共路径
+func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, args ...any) {
+	if level < LogLevel(l.level.Load()) {
+		return
+	}
+
+	msgBuf := buildSpecialMessage(emoji, name, format, args...)
+	defer bytePool.Put(msgBuf)
+
+	if l.format == FormatJSON {
+		l.writeJSONEntry(level, string(msgBuf), nil)
+		return
+	}
+
+	buf := bytePool.Get().([]byte)
+	defer bytePool.Put(buf)
+	buf = buf[:0]
+	buf = l.appendTextHeader(buf, level)
+	buf = append(buf, msgBuf...)
 	l.writeTextBufLocked(level, buf)
+}
+
+// logSpecial 记录特殊类型的日志（无 context）
+func (l *Logger) logSpecial(logType SpecialLogType, level LogLevel, format string, args ...any) {
+	l.logSpecialInternal(level, logType.emoji, logType.name, format, args...)
 }
 
 // Success 成功日志（INFO 级别）
@@ -1965,18 +2021,14 @@ func getPerformanceLevel(duration time.Duration) (emoji, level string) {
 
 // Performance 性能日志（PERFORMANCE 级别，支持可选的详细信息）
 func (l *Logger) Performance(operation string, duration time.Duration, details ...map[string]any) {
-	if PERFORMANCE < l.level {
-		return
-	}
-
 	emoji, level := getPerformanceLevel(duration)
-	msg := fmt.Sprintf("%s [PERF-%s] %s completed in %v", emoji, level, operation, duration)
-
+	format := "%s completed in %v"
+	args := []any{operation, duration}
 	if len(details) > 0 && len(details[0]) > 0 {
-		msg += fmt.Sprintf(" | Details: %+v", details[0])
+		format += " | Details: %+v"
+		args = append(args, details[0])
 	}
-
-	l.ultraLog(PERFORMANCE, msg)
+	l.logSpecialInternal(PERFORMANCE, emoji, "PERF-"+level, format, args...)
 }
 
 // Timing 计时器辅助结构
@@ -2032,53 +2084,70 @@ func getProgressEmoji(percentage float64) string {
 
 // Progress 进度日志（INFO 级别）
 func (l *Logger) Progress(current, total int, operation string) {
-	if INFO < l.level {
-		return
-	}
-
 	percentage := float64(current) / float64(total) * 100
 	emoji := getProgressEmoji(percentage)
-	l.ultraLog(INFO, fmt.Sprintf("%s [PROGRESS] %s: %d/%d (%.1f%%)", emoji, operation, current, total, percentage))
+	l.logSpecialInternal(INFO, emoji, "PROGRESS", "%s: %d/%d (%.1f%%)", operation, current, total, percentage)
 }
 
 // Milestone 里程碑日志（INFO 级别）
 func (l *Logger) Milestone(message string) {
-	if INFO < l.level {
-		return
-	}
-	l.ultraLog(INFO, fmt.Sprintf("🎯 [MILESTONE] %s", message))
+	l.logSpecialInternal(INFO, "🎯", "MILESTONE", "%s", message)
 }
 
 // Health 健康检查日志（WARN 级别用于不健康，INFO 级别用于健康）
 func (l *Logger) Health(service string, status bool, details string) {
 	level := WARN
-	if status {
-		level = INFO
-	}
-
-	if level < l.level {
-		return
-	}
-
 	emoji := "❌"
 	statusStr := "UNHEALTHY"
 	if status {
+		level = INFO
 		emoji = "✅"
 		statusStr = "HEALTHY"
 	}
-
-	detailStr := ""
+	format := "%s: %s"
+	args := []any{service, statusStr}
 	if details != "" {
-		detailStr = fmt.Sprintf(" | %s", details)
+		format += " | %s"
+		args = append(args, details)
 	}
-
-	l.ultraLog(level, fmt.Sprintf("%s [HEALTH] %s: %s%s", emoji, service, statusStr, detailStr))
+	l.logSpecialInternal(level, emoji, "HEALTH", format, args...)
 }
 
 // Audit 审计日志（AUDIT 级别）
 func (l *Logger) Audit(action, user, resource, result string) {
-	if AUDIT < l.level {
+	l.logSpecialInternal(AUDIT, "📋", "AUDIT", "User: %s | Action: %s | Resource: %s | Result: %s", user, action, resource, result)
+}
+
+// LogSpecialContext 记录带上下文的特殊类型日志（公开方法）
+//
+// 使用示例：
+//
+//	logger.LogSpecialContext(ctx, SuccessType, INFO, "操作成功")
+//	logger.LogSpecialContext(ctx, DatabaseType, INFO, "查询 %s 耗时 %v", table, duration)
+//	logger.LogSpecialContext(ctx, SecurityType, SECURITY, "检测到异常访问 %s", ip)
+//
+// JSON 模式：ctx 字段提取到 JSON fields；text 模式：ctx 信息前缀到消息
+func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, level LogLevel, format string, args ...any) {
+	if level < LogLevel(l.level.Load()) {
 		return
 	}
-	l.ultraLog(AUDIT, fmt.Sprintf("📋 [AUDIT] User: %s | Action: %s | Resource: %s | Result: %s", user, action, resource, result))
+
+	msgBuf := buildSpecialMessage(logType.emoji, logType.name, format, args...)
+	defer bytePool.Put(msgBuf)
+
+	if l.format == FormatJSON {
+		l.writeJSONEntry(level, string(msgBuf), l.extractContextFields(ctx))
+		return
+	}
+
+	// text 模式：ctx 信息前缀到消息
+	buf := bytePool.Get().([]byte)
+	defer bytePool.Put(buf)
+	buf = buf[:0]
+	buf = l.appendTextHeader(buf, level)
+	if contextInfo := l.extractContextInfo(ctx); contextInfo != "" {
+		buf = append(buf, contextInfo...)
+	}
+	buf = append(buf, msgBuf...)
+	l.writeTextBufLocked(level, buf)
 }

@@ -188,12 +188,16 @@ func (w *consoleLogWriter) Flush() error {
 }
 
 // Close 关闭输出器
+// 注意：不关闭 os.Stdout/os.Stderr 等进程级标准流，避免影响整个进程的输出
 func (w *consoleLogWriter) Close() error {
 	atomic.StoreInt32(&w.healthyAtomic, 0)
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
 	w.healthy = false
+	if w.output == os.Stdout || w.output == os.Stderr {
+		return nil
+	}
 	if closer, ok := w.output.(io.Closer); ok {
 		return closer.Close()
 	}
@@ -862,5 +866,251 @@ func (w *MultiLogWriter) IsHealthy() bool {
 
 // GetStats 获取统计信息
 func (w *MultiLogWriter) GetStats() WriterStatsSnapshot {
+	return w.stats.getSnapshot()
+}
+
+// AsyncBatchWriter 异步批量输出器
+// 日志先写入 channel，后台 goroutine 定时或批量 flush 到底层输出器
+//
+// 适用场景：高吞吐日志（减少 I/O 系统调用和锁竞争）
+//
+// 风险与处理：
+//   - kill -9 时 channel 中未 flush 的日志会丢失（无法捕获）
+//   - SIGTERM/SIGINT 可通过 Flush() 安全退出（应用需注册 signal handler）
+//   - channel 满时降级为同步写入（不丢日志，但会阻塞调用方）
+type AsyncBatchWriter struct {
+	baseWriter
+	underlying    IWriter            // 底层输出器（实际写入目标）
+	ch            chan []byte        // 日志条目通道
+	batchSize     int                // 批量写入阈值（条数）
+	flushInterval time.Duration      // 定时 flush 间隔
+	done          chan struct{}      // 关闭信号
+	flushCh       chan chan struct{} // flush 请求/响应通道
+	wg            sync.WaitGroup     // 等待 flush goroutine 退出
+	closeOnce     sync.Once          // 确保 Close 只执行一次
+	pool          sync.Pool          // 复用 []byte 减少 GC 压力
+	healthyAtomic int32              // 健康状态（atomic bool: 0=false, 1=true）
+}
+
+// AsyncBatchWriterOption 异步批量输出器配置选项
+type AsyncBatchWriterOption func(*AsyncBatchWriter)
+
+// WithAsyncUnderlying 设置底层输出器
+func WithAsyncUnderlying(underlying IWriter) AsyncBatchWriterOption {
+	return func(w *AsyncBatchWriter) {
+		w.underlying = underlying
+	}
+}
+
+// WithAsyncBatchSize 设置批量写入阈值（条数，默认 100）
+func WithAsyncBatchSize(size int) AsyncBatchWriterOption {
+	return func(w *AsyncBatchWriter) {
+		if size > 0 {
+			w.batchSize = size
+		}
+	}
+}
+
+// WithAsyncFlushInterval 设置定时 flush 间隔（默认 100ms）
+func WithAsyncFlushInterval(interval time.Duration) AsyncBatchWriterOption {
+	return func(w *AsyncBatchWriter) {
+		if interval > 0 {
+			w.flushInterval = interval
+		}
+	}
+}
+
+// WithAsyncChannelSize 设置 channel 缓冲区大小（默认 4096）
+func WithAsyncChannelSize(size int) AsyncBatchWriterOption {
+	return func(w *AsyncBatchWriter) {
+		if size > 0 {
+			w.ch = make(chan []byte, size)
+		}
+	}
+}
+
+// WithAsyncLevel 设置日志级别
+func WithAsyncLevel(level LogLevel) AsyncBatchWriterOption {
+	return func(w *AsyncBatchWriter) {
+		w.level = level
+	}
+}
+
+// NewAsyncBatchWriter 创建异步批量输出器
+//
+// 使用示例：
+//
+//	w := NewAsyncBatchWriter(
+//	    WithAsyncUnderlying(NewFileWriter(WithFileWriterPath("app.log"))),
+//	    WithAsyncBatchSize(200),
+//	    WithAsyncFlushInterval(50*time.Millisecond),
+//	)
+//	logger := NewLogger().WithOutput(w)
+//	// 应用退出时务必调用 Flush() 或 Close()
+//	defer w.Close()
+func NewAsyncBatchWriter(opts ...AsyncBatchWriterOption) *AsyncBatchWriter {
+	w := &AsyncBatchWriter{
+		baseWriter: baseWriter{
+			level:   DEBUG,
+			healthy: true,
+			stats:   newWriterStats(),
+		},
+		batchSize:     100,
+		flushInterval: 100 * time.Millisecond,
+		ch:            make(chan []byte, 4096),
+		done:          make(chan struct{}),
+		flushCh:       make(chan chan struct{}, 1),
+		pool: sync.Pool{
+			New: func() any { return make([]byte, 0, 4096) },
+		},
+	}
+
+	for _, opt := range opts {
+		opt(w)
+	}
+
+	atomic.StoreInt32(&w.healthyAtomic, 1)
+
+	// 启动后台 flush goroutine
+	w.wg.Add(1)
+	go w.flushLoop()
+
+	return w
+}
+
+// flushLoop 后台批量写入循环
+func (w *AsyncBatchWriter) flushLoop() {
+	defer w.wg.Done()
+	ticker := time.NewTicker(w.flushInterval)
+	defer ticker.Stop()
+
+	batch := make([][]byte, 0, w.batchSize)
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		// 逐条写入底层输出器（底层通常有 bufio 缓冲，合并写入无额外收益）
+		for _, p := range batch {
+			w.underlying.Write(p)
+			w.pool.Put(p[:0]) // 归还到 pool
+		}
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case p, ok := <-w.ch:
+			if !ok {
+				// channel 已关闭，flush 剩余条目后退出
+				flush()
+				return
+			}
+			batch = append(batch, p)
+			if len(batch) >= w.batchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case flushReq := <-w.flushCh:
+			// 收到 flush 请求：先 drain channel 中的待处理条目
+		drainLoop:
+			for {
+				select {
+				case p, ok := <-w.ch:
+					if !ok {
+						flush()
+						close(flushReq)
+						return
+					}
+					batch = append(batch, p)
+				default:
+					flush()
+					close(flushReq)
+					break drainLoop
+				}
+			}
+		case <-w.done:
+			// 收到关闭信号，drain channel 后 flush
+			for {
+				select {
+				case p, ok := <-w.ch:
+					if !ok {
+						flush()
+						return
+					}
+					batch = append(batch, p)
+				default:
+					flush()
+					return
+				}
+			}
+		}
+	}
+}
+
+// Write 实现 io.Writer 接口
+// 注意：p 的内容会被复制到池化 buffer，因为调用方（如 Logger 的 bytePool）可能复用 p
+func (w *AsyncBatchWriter) Write(p []byte) (n int, err error) {
+	if atomic.LoadInt32(&w.healthyAtomic) == 0 {
+		return 0, fmt.Errorf("async batch writer is not healthy")
+	}
+
+	// 复制到池化 buffer（调用方可能复用 p）
+	buf := w.pool.Get().([]byte)
+	buf = append(buf[:0], p...)
+
+	select {
+	case w.ch <- buf:
+		// 成功入队
+	default:
+		// channel 满，降级为同步写入（不丢日志）
+		w.underlying.Write(buf)
+		w.pool.Put(buf[:0])
+	}
+
+	w.stats.addBytes(int64(len(p)))
+	return len(p), nil
+}
+
+// WriteLevel 按级别写入
+func (w *AsyncBatchWriter) WriteLevel(level LogLevel, data []byte) (n int, err error) {
+	if level < w.level {
+		return len(data), nil
+	}
+	return w.Write(data)
+}
+
+// Flush 手动刷新所有待写入的日志条目
+// 应用应在 SIGTERM/SIGINT 信号处理中调用此方法
+func (w *AsyncBatchWriter) Flush() error {
+	flushDone := make(chan struct{})
+	w.flushCh <- flushDone
+	<-flushDone
+	return w.underlying.Flush()
+}
+
+// Close 关闭输出器（停止 goroutine 并 flush 剩余条目）
+func (w *AsyncBatchWriter) Close() error {
+	w.closeOnce.Do(func() {
+		atomic.StoreInt32(&w.healthyAtomic, 0)
+		close(w.done)
+		w.wg.Wait()
+		w.healthy = false
+		if w.underlying != nil {
+			w.underlying.Flush()
+			w.underlying.Close()
+		}
+	})
+	return nil
+}
+
+// IsHealthy 检查健康状态
+func (w *AsyncBatchWriter) IsHealthy() bool {
+	return atomic.LoadInt32(&w.healthyAtomic) == 1
+}
+
+// GetStats 获取统计信息
+func (w *AsyncBatchWriter) GetStats() WriterStatsSnapshot {
 	return w.stats.getSnapshot()
 }

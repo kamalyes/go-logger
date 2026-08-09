@@ -266,7 +266,7 @@ func (s *TypesTestSuite) TestLoggerChainedBuilder() {
 	assert.Equal(s.T(), INFO, logger.GetLevel())
 	assert.Equal(s.T(), "[APP] ", logger.prefix)
 	assert.False(s.T(), logger.colorful)
-	assert.False(s.T(), logger.showCaller)
+	assert.False(s.T(), logger.showCaller.Load())
 	assert.Equal(s.T(), FormatJSON, logger.format)
 }
 
@@ -274,8 +274,8 @@ func (s *TypesTestSuite) TestLoggerChainedBuilder() {
 func (s *TypesTestSuite) TestLoggerDefaultValues() {
 	logger := NewLogger()
 
-	assert.Equal(s.T(), DEBUG, logger.level)
-	assert.True(s.T(), logger.showCaller)
+	assert.Equal(s.T(), DEBUG, LogLevel(logger.level.Load()))
+	assert.True(s.T(), logger.showCaller.Load())
 	assert.True(s.T(), logger.colorful)
 	assert.Equal(s.T(), "", logger.prefix)
 	assert.Equal(s.T(), time.RFC3339Nano, logger.timeFormat)

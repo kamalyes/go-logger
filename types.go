@@ -17,6 +17,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kamalyes/go-toolbox/pkg/syncx"
@@ -38,9 +39,9 @@ const (
 
 // Logger 主要的日志记录器结构体
 type Logger struct {
-	// 基本配置
-	level          LogLevel
-	showCaller     bool
+	// 基本配置（level 和 showCaller 使用原子操作，允许运行时并发修改）
+	level          atomic.Int32
+	showCaller     atomic.Bool
 	colorful       bool
 	prefix         string
 	timeFormat     string
@@ -163,9 +164,7 @@ func (s *LoggerStats) GetStats() *LoggerStats {
 
 // NewLogger 创建新的日志记录器（默认配置）
 func NewLogger() *Logger {
-	return &Logger{
-		level:          DEBUG,
-		showCaller:     true,
+	l := &Logger{
 		colorful:       true,
 		prefix:         "",
 		timeFormat:     time.RFC3339Nano,
@@ -187,6 +186,9 @@ func NewLogger() *Logger {
 		stats:          NewLoggerStats(),
 		mu:             sync.Mutex{},
 	}
+	l.level.Store(int32(DEBUG))
+	l.showCaller.Store(true)
+	return l
 }
 
 // ============================================================================
@@ -195,13 +197,13 @@ func NewLogger() *Logger {
 
 // WithLevel 设置日志级别
 func (l *Logger) WithLevel(level LogLevel) *Logger {
-	l.level = level
+	l.level.Store(int32(level))
 	return l
 }
 
 // WithShowCaller 设置是否显示调用者信息
 func (l *Logger) WithShowCaller(show bool) *Logger {
-	l.showCaller = show
+	l.showCaller.Store(show)
 	return l
 }
 
@@ -338,12 +340,12 @@ func (l *Logger) WithContextExtractor(extractor ContextExtractor) *Logger {
 
 // IsShowCaller 检查是否显示调用者信息
 func (l *Logger) IsShowCaller() bool {
-	return l.showCaller
+	return l.showCaller.Load()
 }
 
 // IsLevelEnabled 检查给定级别是否启用
 func (l *Logger) IsLevelEnabled(level LogLevel) bool {
-	return level >= l.level
+	return level >= LogLevel(l.level.Load())
 }
 
 func (l *Logger) Clone() ILogger {
@@ -354,8 +356,6 @@ func (l *Logger) Clone() ILogger {
 	// 使用深拷贝复制数据（会自动跳过 mutex 和 sync.Once）
 	if err := syncx.DeepCopy(newLogger, l); err != nil {
 		// 如果深拷贝失败，降级为手动拷贝
-		newLogger.level = l.level
-		newLogger.showCaller = l.showCaller
 		newLogger.colorful = l.colorful
 		newLogger.prefix = l.prefix
 		newLogger.timeFormat = l.timeFormat
@@ -377,6 +377,10 @@ func (l *Logger) Clone() ILogger {
 		newLogger.writers = l.writers
 		newLogger.contextKeys = append([]compiledContextKey(nil), l.contextKeys...)
 	}
+
+	// 原子字段必须手动拷贝（DeepCopy 无法处理 atomic.Int32/atomic.Bool）
+	newLogger.level.Store(l.level.Load())
+	newLogger.showCaller.Store(l.showCaller.Load())
 
 	// 确保使用新的统计信息
 	newLogger.stats = NewLoggerStats()

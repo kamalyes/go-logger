@@ -96,6 +96,9 @@ type ILogger interface {
 	LogKV(level LogLevel, msg string, keysAndValues ...interface{})
 	LogWithFields(level LogLevel, msg string, fields map[string]interface{})
 
+	// 特殊类型日志方法（带 context，支持 emoji 分类日志）
+	LogSpecialContext(ctx context.Context, logType SpecialLogType, level LogLevel, format string, args ...interface{})
+
 	// 配置方法
 	SetLevel(level LogLevel)
 	GetLevel() LogLevel

@@ -18,9 +18,7 @@ import (
 
 // 创建输出到 io.Discard 的 logger，消除 I/O 开销，专注测量 logger 自身开销
 func benchLogger(format FormatType, showCaller bool) *Logger {
-	return &Logger{
-		level:        DEBUG,
-		showCaller:   showCaller,
+	l := &Logger{
 		colorful:     false,
 		format:       format,
 		timeFormat:   "2006/01/02 15:04:05",
@@ -31,6 +29,9 @@ func benchLogger(format FormatType, showCaller bool) *Logger {
 		callerKey:    "caller",
 		contextKeys:  append([]compiledContextKey(nil), defaultCompiledContextKeys...),
 	}
+	l.level.Store(int32(DEBUG))
+	l.showCaller.Store(showCaller)
+	return l
 }
 
 // ==================== JSON 模式（生产默认） ====================
