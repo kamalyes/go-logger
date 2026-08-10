@@ -56,6 +56,9 @@ jobs:
           - kamalyes/go-config
           - kamalyes/go-logger-adapter
           - kamalyes/go-natsx
+          - kamalyes/go-i18n
+          - kamalyes/go-pbmo
+          - kamalyes/go-swagger
           - kamalyes/go-sqlbuilder
     steps:
       - name: Dispatch to ${{ matrix.repo }}
