@@ -199,3 +199,87 @@ func (l *Logger) WithContextKeys(keys ...string) *Logger {
 	l.contextExtractor = nil
 	return l
 }
+
+// ExtractTraceID 从 ctx 提取 trace_id
+// 优先级：OTel span > ctx.Value(ContextKeyTraceID) > 空
+// 直接复用 context.go 的 extractOTelTraceID，保证与日志输出使用同一真相源
+func ExtractTraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	// 1. OTel span（单一真相源）- 复用 context.go 内部函数
+	if id := extractOTelTraceID(ctx); id != "" {
+		return id
+	}
+	// 2. ctx.Value fallback（ContextKeyTraceID = "trace_id"）
+	if v := ctx.Value(ContextKeyTraceID); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// ContextWithTraceID 创建携带 trace_id 的 context
+// 如果 ctx 已有 trace_id 则不覆盖（尊重上游传入的值）
+func ContextWithTraceID(ctx context.Context, traceID string) context.Context {
+	if traceID == "" {
+		return ctx
+	}
+	if ExtractTraceID(ctx) != "" {
+		return ctx // 已有则不覆盖
+	}
+	return context.WithValue(ctx, ContextKeyTraceID, traceID)
+}
+
+// InjectTraceToOutgoing 将 trace_id 注入 gRPC outgoing metadata
+// 用于 gRPC 客户端调用远程节点时传播 trace
+// 确保 OTel 未启用时仍可传播
+func InjectTraceToOutgoing(ctx context.Context, traceID string) context.Context {
+	if traceID == "" {
+		return ctx
+	}
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		md = metadata.MD{}
+	} else {
+		md = md.Copy() // 避免修改共享的 metadata
+	}
+	md.Set(ContextKeyTraceID, traceID)
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// ExtractTraceFromIncoming 从 gRPC incoming metadata 提取 trace_id
+// 优先级：OTel span > metadata > ctx.Value
+// 用于 gRPC 服务端接收到远程节点请求时恢复 trace
+func ExtractTraceFromIncoming(ctx context.Context) string {
+	// 1. OTel span - 复用 context.go 内部函数
+	if id := extractOTelTraceID(ctx); id != "" {
+		return id
+	}
+	// 2. metadata fallback
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get(ContextKeyTraceID); len(vals) > 0 && vals[0] != "" {
+			return vals[0]
+		}
+	}
+	// 3. ctx.Value fallback
+	if v := ctx.Value(ContextKeyTraceID); v != nil {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// RestoreTraceFromIncoming 从 gRPC incoming 恢复 trace_id 到 ctx
+// 如果提取到 trace_id 但 ctx 中没有，则注入到 ctx.Value
+// 返回增强后的 ctx，供下游 logger 自动输出 trace_id
+func RestoreTraceFromIncoming(ctx context.Context) context.Context {
+	traceID := ExtractTraceFromIncoming(ctx)
+	if traceID == "" {
+		return ctx
+	}
+	// 只在 ctx 中缺失时注入，不覆盖已有值
+	return ContextWithTraceID(ctx, traceID)
+}
