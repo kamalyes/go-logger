@@ -90,6 +90,12 @@ type ILogger interface {
 	WarnLines(lines ...string)
 	DebugLines(lines ...string)
 
+	// 多行日志方法（带上下文，每一行均附加 ctx 中的 trace 等信息）
+	DebugContextLines(ctx context.Context, lines ...string)
+	InfoContextLines(ctx context.Context, lines ...string)
+	WarnContextLines(ctx context.Context, lines ...string)
+	ErrorContextLines(ctx context.Context, lines ...string)
+
 	// 原始日志条目方法（最灵活）
 	Log(level LogLevel, msg string)
 	LogContext(ctx context.Context, level LogLevel, msg string)

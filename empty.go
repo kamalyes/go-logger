@@ -109,6 +109,12 @@ func (e *EmptyLogger) ErrorLines(lines ...string) {}
 func (e *EmptyLogger) WarnLines(lines ...string)  {}
 func (e *EmptyLogger) DebugLines(lines ...string) {}
 
+// 多行日志方法（带上下文）
+func (e *EmptyLogger) DebugContextLines(ctx context.Context, lines ...string) {}
+func (e *EmptyLogger) InfoContextLines(ctx context.Context, lines ...string)  {}
+func (e *EmptyLogger) WarnContextLines(ctx context.Context, lines ...string)  {}
+func (e *EmptyLogger) ErrorContextLines(ctx context.Context, lines ...string) {}
+
 // 带上下文的日志方法
 func (e *EmptyLogger) DebugContext(ctx context.Context, format string, args ...interface{}) {}
 func (e *EmptyLogger) InfoContext(ctx context.Context, format string, args ...interface{})  {}

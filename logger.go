@@ -748,6 +748,45 @@ func (l *Logger) DebugLines(lines ...string) {
 	}
 }
 
+// logWithContextLines 多行上下文日志内部实现 - 每一行均附加 ctx 信息
+func (l *Logger) logWithContextLines(ctx context.Context, level LogLevel, lines ...string) {
+	if level < LogLevel(l.level.Load()) {
+		return
+	}
+	if l.format == FormatJSON {
+		fields := l.extractContextFields(ctx)
+		for _, line := range lines {
+			l.ultraLogWithFields(level, line, fields)
+		}
+		return
+	}
+	contextInfo := l.extractContextInfo(ctx)
+	for _, line := range lines {
+		msg := line
+		if contextInfo != "" {
+			msg = contextInfo + line
+		}
+		l.ultraLog(level, msg)
+	}
+}
+
+// 多行日志方法（带上下文）
+func (l *Logger) DebugContextLines(ctx context.Context, lines ...string) {
+	l.logWithContextLines(ctx, DEBUG, lines...)
+}
+
+func (l *Logger) InfoContextLines(ctx context.Context, lines ...string) {
+	l.logWithContextLines(ctx, INFO, lines...)
+}
+
+func (l *Logger) WarnContextLines(ctx context.Context, lines ...string) {
+	l.logWithContextLines(ctx, WARN, lines...)
+}
+
+func (l *Logger) ErrorContextLines(ctx context.Context, lines ...string) {
+	l.logWithContextLines(ctx, ERROR, lines...)
+}
+
 // SetContextExtractor 设置自定义上下文提取器
 func (l *Logger) SetContextExtractor(extractor ContextExtractor) {
 	l.contextExtractor = extractor
@@ -1409,6 +1448,46 @@ func (f *fieldLogger) DebugLines(lines ...string) {
 	for _, line := range lines {
 		f.logger.logWithFields(DEBUG, line, f.fields)
 	}
+}
+
+// logWithContextFieldsLines 是 fieldLogger.*ContextLines 系列方法的公共实现
+// 统一处理 level 检查、JSON/text 模式分支、ctx 信息 + f.fields 合并
+func (f *fieldLogger) logWithContextFieldsLines(ctx context.Context, level LogLevel, lines ...string) {
+	if level < LogLevel(f.logger.level.Load()) {
+		return
+	}
+	if f.logger.format == FormatJSON {
+		fields := f.mergeContextFields(ctx)
+		for _, line := range lines {
+			f.logger.ultraLogWithFields(level, line, fields)
+		}
+		return
+	}
+	contextInfo := f.logger.extractContextInfo(ctx)
+	for _, line := range lines {
+		msg := line
+		if contextInfo != "" {
+			msg = contextInfo + line
+		}
+		f.logger.logWithFields(level, msg, f.fields)
+	}
+}
+
+// 多行日志方法（带上下文）
+func (f *fieldLogger) DebugContextLines(ctx context.Context, lines ...string) {
+	f.logWithContextFieldsLines(ctx, DEBUG, lines...)
+}
+
+func (f *fieldLogger) InfoContextLines(ctx context.Context, lines ...string) {
+	f.logWithContextFieldsLines(ctx, INFO, lines...)
+}
+
+func (f *fieldLogger) WarnContextLines(ctx context.Context, lines ...string) {
+	f.logWithContextFieldsLines(ctx, WARN, lines...)
+}
+
+func (f *fieldLogger) ErrorContextLines(ctx context.Context, lines ...string) {
+	f.logWithContextFieldsLines(ctx, ERROR, lines...)
 }
 
 // mergeContextFields 合并 context 提取的 fields 和 f.fields（用于 JSON 模式）

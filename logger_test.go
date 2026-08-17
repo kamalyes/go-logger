@@ -182,6 +182,29 @@ func (s *LoggerTestSuite) TestLinesLogging() {
 	assert.Contains(s.T(), output, "line 3")
 }
 
+// TestContextLinesLogging 测试带上下文的多行日志（每一行均附加 trace 信息）
+func (s *LoggerTestSuite) TestContextLinesLogging() {
+	traceID := random.UUID()
+	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+
+	s.logger.InfoContextLines(ctx, "ctx line 1", "ctx line 2")
+	output := s.buffer.String()
+	assert.Contains(s.T(), output, "ctx line 1")
+	assert.Contains(s.T(), output, "ctx line 2")
+	// 每一行都应带上 trace_id
+	assert.Equal(s.T(), 2, strings.Count(output, traceID))
+
+	s.buffer.Reset()
+
+	// fieldLogger 场景：字段与 ctx 信息同时保留
+	fieldLogger := s.logger.WithField("module", "wsc")
+	fieldLogger.WarnContextLines(ctx, "field ctx line")
+	output = s.buffer.String()
+	assert.Contains(s.T(), output, "field ctx line")
+	assert.Contains(s.T(), output, traceID)
+	assert.Contains(s.T(), output, "wsc")
+}
+
 // TestReturnMethods 测试返回错误的日志方法
 func (s *LoggerTestSuite) TestReturnMethods() {
 	err := s.logger.ErrorReturn("operation failed: %s", "timeout")
