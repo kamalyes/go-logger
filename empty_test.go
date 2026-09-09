@@ -14,7 +14,6 @@ package logger
 import (
 	"testing"
 
-	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -111,7 +110,7 @@ func (suite *EmptyLoggerTestSuite) TestEmptyLoggerClone() {
 
 // TestEmptyAdapter 测试空适配器
 func TestEmptyAdapter(t *testing.T) {
-	adapterName := random.UUID()
+	adapterName := testUUID()
 	adapter := NewEmptyAdapter(adapterName)
 
 	assert.NotNil(t, adapter)

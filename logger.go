@@ -19,9 +19,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/kamalyes/go-toolbox/pkg/convert"
-	"github.com/kamalyes/go-toolbox/pkg/stringx"
 )
 
 // ============================================================================
@@ -166,7 +163,7 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 			buf = append(buf, '[')
 			buf = append(buf, file...)
 			buf = append(buf, ':')
-			buf = stringx.FastAppendInt(buf, line)
+			buf = strconv.AppendInt(buf, int64(line), 10)
 			buf = append(buf, ':')
 			buf = append(buf, funcName...)
 			buf = append(buf, ']', ' ')
@@ -223,7 +220,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 			buf = append(buf, '[')
 			buf = append(buf, file...)
 			buf = append(buf, ':')
-			buf = stringx.FastAppendInt(buf, line)
+			buf = strconv.AppendInt(buf, int64(line), 10)
 			buf = append(buf, ':')
 			buf = append(buf, funcName...)
 			buf = append(buf, ']', ' ')
@@ -339,7 +336,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		}
 		buf = append(buf, k...)
 		buf = append(buf, kvSeparator...)
-		buf = convert.AppendValue(buf, v)
+		buf = appendValue(buf, v)
 		first = false
 	}
 
@@ -846,7 +843,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 
 	// 检查是否是单个对象参数
 	if len(keysAndValues) == 1 {
-		if objFields := convert.ParseObjectToMap(keysAndValues[0]); objFields != nil {
+		if objFields := parseObjectToMap(keysAndValues[0]); objFields != nil {
 			l.logWithFields(level, msg, objFields)
 			return
 		}
@@ -874,12 +871,12 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		}
 
 		// 键
-		buf = convert.AppendValue(buf, keysAndValues[i])
+		buf = appendValue(buf, keysAndValues[i])
 		buf = append(buf, kvSeparator...)
 
 		// 值
 		if i+1 < len(keysAndValues) {
-			buf = convert.AppendValue(buf, keysAndValues[i+1])
+			buf = appendValue(buf, keysAndValues[i+1])
 		} else {
 			buf = append(buf, kvMissing...)
 		}
@@ -943,7 +940,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 		}
 		buf = append(buf, k...)
 		buf = append(buf, kvSeparator...)
-		buf = convert.AppendValue(buf, v)
+		buf = appendValue(buf, v)
 		first = false
 	}
 

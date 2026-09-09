@@ -15,8 +15,6 @@ import (
 	"io"
 	"os"
 	"time"
-
-	"github.com/kamalyes/go-toolbox/pkg/mathx"
 )
 
 // OutputType 输出类型
@@ -125,8 +123,8 @@ func createRotateWriter(config *WriterConfig) (IWriter, error) {
 		return nil, errors.New(ErrMsgRotatePathEmpty)
 	}
 
-	maxSize := mathx.IfNotZero(config.MaxSize, DefaultMaxSize)
-	maxFiles := mathx.IfNotZero(config.MaxFiles, DefaultMaxFiles)
+	maxSize := ifZero(config.MaxSize, DefaultMaxSize)
+	maxFiles := ifZero(config.MaxFiles, DefaultMaxFiles)
 
 	opts := []RotateWriterOption{
 		WithFilePath(config.FilePath),

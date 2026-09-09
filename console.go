@@ -18,8 +18,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/kamalyes/go-toolbox/pkg/stringx"
 )
 
 // ConsoleGroup 控制台分组
@@ -364,7 +362,11 @@ func (cg *ConsoleGroup) buildTableFromReflect(_ interface{}) *ConsoleTable {
 // displayWidth 计算字符串的显示宽度（考虑中文、表情等宽字符）
 // 使用东亚宽度（East Asian Width）标准
 func (cg *ConsoleGroup) displayWidth(s string) int {
-	return stringx.DisplayWidth(s)
+	width := 0
+	for _, r := range s {
+		width += runeWidth(r)
+	}
+	return width
 }
 
 // formatTable 格式化表格输出
@@ -451,7 +453,7 @@ func (cg *ConsoleGroup) formatTable(table *ConsoleTable, indent string) string {
 				var displayCell string
 				// 只对 Value 列（第二列，索引为 1）进行截断
 				if i == 1 && cg.displayWidth(cell) > colWidths[i] {
-					displayCell = stringx.TruncateAppendEllipsis(cell, colWidths[i])
+					displayCell = truncateAppendEllipsis(cell, colWidths[i])
 				} else {
 					displayCell = cell
 				}

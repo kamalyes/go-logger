@@ -15,8 +15,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kamalyes/go-toolbox/pkg/contextx"
-	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
@@ -132,8 +130,8 @@ func (s *ConsoleTestSuite) TestCollapsedGroupFiltering() {
 // ConsoleGroup 是控制台展示功能，不走 logger 格式化，不提取 traceId
 // InfoContext 的 ctx 参数仅保留用于 API 兼容，输出为纯文本
 func (s *ConsoleTestSuite) TestGroupWithContext() {
-	traceID := random.UUID()
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	cg := s.logger.NewConsoleGroup()
 	cg.Group("Context Group")
 	s.buffer.Reset()

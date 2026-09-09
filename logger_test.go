@@ -14,17 +14,29 @@ package logger
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kamalyes/go-toolbox/pkg/contextx"
-	"github.com/kamalyes/go-toolbox/pkg/random"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
+
+// testUUID 生成测试用随机 UUID（标准库实现，零依赖）
+func testUUID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "test-trace-id"
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	s := hex.EncodeToString(b)
+	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:]
+}
 
 // LoggerTestSuite 日志器测试套件
 type LoggerTestSuite struct {
@@ -134,8 +146,8 @@ func (s *LoggerTestSuite) TestWithError() {
 // TestContextLogging 测试带上下文的日志
 func (s *LoggerTestSuite) TestContextLogging() {
 	ctx := context.Background()
-	traceID := random.UUID()
-	ctx = contextx.WithValue(ctx, ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx = context.WithValue(ctx, ContextKeyTraceID, traceID)
 
 	s.logger.InfoContext(ctx, "processing request")
 	output := s.buffer.String()
@@ -155,8 +167,8 @@ func (s *LoggerTestSuite) TestKVLogging() {
 
 // TestContextKVLogging 测试带上下文的键值对日志
 func (s *LoggerTestSuite) TestContextKVLogging() {
-	traceID := random.UUID()
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	s.logger.InfoContextKV(ctx, "operation", "key", "value")
 	output := s.buffer.String()
 	assert.Contains(s.T(), output, traceID)
@@ -184,8 +196,8 @@ func (s *LoggerTestSuite) TestLinesLogging() {
 
 // TestContextLinesLogging 测试带上下文的多行日志（每一行均附加 trace 信息）
 func (s *LoggerTestSuite) TestContextLinesLogging() {
-	traceID := random.UUID()
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, traceID)
 
 	s.logger.InfoContextLines(ctx, "ctx line 1", "ctx line 2")
 	output := s.buffer.String()
@@ -216,8 +228,8 @@ func (s *LoggerTestSuite) TestReturnMethods() {
 
 // TestContextReturnMethods 测试带上下文返回错误的方法
 func (s *LoggerTestSuite) TestContextReturnMethods() {
-	traceID := random.UUID()
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	err := s.logger.ErrorCtxReturn(ctx, "context error: %s", "failed")
 	assert.NotNil(s.T(), err)
 	assert.Contains(s.T(), err.Error(), "context error")
@@ -264,8 +276,8 @@ func (s *LoggerTestSuite) TestClone() {
 
 // TestWithContext 测试带上下文的日志器
 func (s *LoggerTestSuite) TestWithContext() {
-	traceID := random.UUID()
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, traceID)
+	traceID := testUUID()
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, traceID)
 	ctxLogger := s.logger.WithContext(ctx)
 	assert.NotNil(s.T(), ctxLogger)
 }
@@ -483,7 +495,7 @@ func BenchmarkLoggerContext(b *testing.B) {
 		WithLevel(INFO)
 
 	ctx := context.Background()
-	ctx = contextx.WithValue(ctx, ContextKeyTraceID, random.UUID())
+	ctx = context.WithValue(ctx, ContextKeyTraceID, testUUID())
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -575,8 +587,8 @@ func TestLoggerWithContextKeys(t *testing.T) {
 		WithContextKeys(ContextKeyTraceID, "biz_id")
 
 	ctx := context.Background()
-	ctx = contextx.WithValue(ctx, ContextKeyTraceID, "trace-123")
-	ctx = contextx.WithValue(ctx, "biz_id", "biz-456")
+	ctx = context.WithValue(ctx, ContextKeyTraceID, "trace-123")
+	ctx = context.WithValue(ctx, "biz_id", "biz-456")
 
 	logger.InfoContext(ctx, "custom context")
 
@@ -599,7 +611,7 @@ func TestLoggerWithContextKeysResetsCustomExtractor(t *testing.T) {
 
 	logger.WithContextKeys(ContextKeyTraceID)
 
-	ctx := contextx.WithValue(context.Background(), ContextKeyTraceID, "trace-123")
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, "trace-123")
 	logger.InfoContext(ctx, "context by keys")
 
 	output := buffer.String()

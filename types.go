@@ -19,8 +19,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/kamalyes/go-toolbox/pkg/syncx"
 )
 
 // ============================================================================
@@ -139,20 +137,17 @@ func (s *LoggerStats) GetStats() *LoggerStats {
 		LevelCounts: make(map[LogLevel]int64),
 	}
 
-	// 使用深拷贝复制数据（会自动跳过 mutex）
-	if err := syncx.DeepCopy(clone, s); err != nil {
-		// 如果深拷贝失败，降级为手动拷贝
-		clone.StartTime = s.StartTime
-		clone.TotalLogs = s.TotalLogs
-		clone.ErrorCount = s.ErrorCount
-		clone.LastLogTime = s.LastLogTime
-		clone.Uptime = s.Uptime
-		clone.BytesWritten = s.BytesWritten
+	// 手动复制值字段（跳过 mutex 与 LevelCounts map）
+	clone.StartTime = s.StartTime
+	clone.TotalLogs = s.TotalLogs
+	clone.ErrorCount = s.ErrorCount
+	clone.LastLogTime = s.LastLogTime
+	clone.Uptime = s.Uptime
+	clone.BytesWritten = s.BytesWritten
 
-		// 手动复制 map
-		for k, v := range s.LevelCounts {
-			clone.LevelCounts[k] = v
-		}
+	// 手动复制 map
+	for k, v := range s.LevelCounts {
+		clone.LevelCounts[k] = v
 	}
 
 	return clone
@@ -353,30 +348,27 @@ func (l *Logger) Clone() ILogger {
 		stats: NewLoggerStats(),
 	}
 
-	// 使用深拷贝复制数据（会自动跳过 mutex 和 sync.Once）
-	if err := syncx.DeepCopy(newLogger, l); err != nil {
-		// 如果深拷贝失败，降级为手动拷贝
-		newLogger.colorful = l.colorful
-		newLogger.prefix = l.prefix
-		newLogger.timeFormat = l.timeFormat
-		newLogger.format = l.format
-		newLogger.callerDepth = l.callerDepth
-		newLogger.showStacktrace = l.showStacktrace
-		newLogger.timestampKey = l.timestampKey
-		newLogger.levelKey = l.levelKey
-		newLogger.messageKey = l.messageKey
-		newLogger.callerKey = l.callerKey
-		newLogger.stacktraceKey = l.stacktraceKey
-		newLogger.asyncWrite = l.asyncWrite
-		newLogger.bufferSize = l.bufferSize
-		newLogger.batchSize = l.batchSize
-		newLogger.batchTimeout = l.batchTimeout
-		newLogger.output = l.output
-		newLogger.logger = l.logger
-		newLogger.formatter = l.formatter
-		newLogger.writers = l.writers
-		newLogger.contextKeys = append([]compiledContextKey(nil), l.contextKeys...)
-	}
+	// 手动复制字段（跳过 mutex、sync.Once、stats 与原子状态）
+	newLogger.colorful = l.colorful
+	newLogger.prefix = l.prefix
+	newLogger.timeFormat = l.timeFormat
+	newLogger.format = l.format
+	newLogger.callerDepth = l.callerDepth
+	newLogger.showStacktrace = l.showStacktrace
+	newLogger.timestampKey = l.timestampKey
+	newLogger.levelKey = l.levelKey
+	newLogger.messageKey = l.messageKey
+	newLogger.callerKey = l.callerKey
+	newLogger.stacktraceKey = l.stacktraceKey
+	newLogger.asyncWrite = l.asyncWrite
+	newLogger.bufferSize = l.bufferSize
+	newLogger.batchSize = l.batchSize
+	newLogger.batchTimeout = l.batchTimeout
+	newLogger.output = l.output
+	newLogger.logger = l.logger
+	newLogger.formatter = l.formatter
+	newLogger.writers = l.writers
+	newLogger.contextKeys = append([]compiledContextKey(nil), l.contextKeys...)
 
 	// 原子字段必须手动拷贝（DeepCopy 无法处理 atomic.Int32/atomic.Bool）
 	newLogger.level.Store(l.level.Load())
