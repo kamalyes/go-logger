@@ -26,9 +26,26 @@ import (
 // ============================================================================
 
 const (
-	maxLogMessageSize    = 4096 // 单条日志消息的最大预分配大小（适应带 caller 的 JSON 日志）
-	estimatedContextSize = 128  // 预估的上下文信息大小（TraceID 等）
+	maxLogMessageSize    = 4096      // 单条日志消息的最大预分配大小（适应带 caller 的 JSON 日志）
+	estimatedContextSize = 128       // 预估的上下文信息大小（TraceID 等）
+	maxPooledBufferCap   = 16 * 1024 // 池中保留 buffer 的最大容量上限
 )
+
+// putPooledBuf 归还 buffer 到对象池；容量超过 maxPooledBufferCap 的 buffer 直接丢弃（交由 GC 回收）
+// 背景：个别超大日志（长堆栈、大 payload）会把 buffer append 撑大，无条件归还会让
+// 大 buffer 永久驻留在 sync.Pool 的 per-P 缓存中；高并发突发时驻留量 = P 数 × 大 buffer，
+// 生产环境曾因此观察到 bytePool 驻留 56MB+（pprof inuse 归因 init.func2）
+func putPooledBuf(pool *sync.Pool, buf []byte) {
+	if cap(buf) > maxPooledBufferCap {
+		return
+	}
+	pool.Put(buf[:0])
+}
+
+// putByteBuf 归还 buffer 到 bytePool（容量超限丢弃）
+func putByteBuf(buf []byte) {
+	putPooledBuf(&bytePool, buf)
+}
 
 // 字节池 - 用于日志消息构建
 var bytePool = sync.Pool{
@@ -201,7 +218,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	// 文本路径：内联构建完整条目
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 
 	// 添加时间戳
 	buf = time.Now().AppendFormat(buf, l.timeFormat)
@@ -239,7 +256,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	// 同时复用 bytePool 减少分配
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 
 	buf = append(buf, '{')
 
@@ -323,7 +340,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -859,7 +876,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -927,7 +944,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
 	buf := bytePool.Get().([]byte)
 	buf = buf[:0]
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -1995,7 +2012,7 @@ func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, 
 	}
 
 	msgBuf := buildSpecialMessage(emoji, name, format, args...)
-	defer bytePool.Put(msgBuf)
+	defer putByteBuf(msgBuf)
 
 	if l.format == FormatJSON {
 		l.writeJSONEntry(level, string(msgBuf), nil)
@@ -2003,7 +2020,7 @@ func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, 
 	}
 
 	buf := bytePool.Get().([]byte)
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 	buf = buf[:0]
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msgBuf...)
@@ -2209,7 +2226,7 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 	}
 
 	msgBuf := buildSpecialMessage(logType.emoji, logType.name, format, args...)
-	defer bytePool.Put(msgBuf)
+	defer putByteBuf(msgBuf)
 
 	if l.format == FormatJSON {
 		l.writeJSONEntry(level, string(msgBuf), l.extractContextFields(ctx))
@@ -2218,7 +2235,7 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 
 	// text 模式：ctx 信息前缀到消息
 	buf := bytePool.Get().([]byte)
-	defer bytePool.Put(buf)
+	defer putByteBuf(buf)
 	buf = buf[:0]
 	buf = l.appendTextHeader(buf, level)
 	if contextInfo := l.extractContextInfo(ctx); contextInfo != "" {

@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -511,4 +512,63 @@ func BenchmarkMultiWriter(b *testing.B) {
 	}
 
 	multiWriter.Close()
+}
+
+// TestPutPooledBuf_SmallBufferReused 小 buffer 正常归还并可复用
+func TestPutPooledBuf_SmallBufferReused(t *testing.T) {
+	var pool sync.Pool
+
+	buf := make([]byte, 0, 1024)
+	putPooledBuf(&pool, buf)
+
+	got := pool.Get()
+	assert.NotNil(t, got, "小 buffer 应归还到池中")
+	assert.Equal(t, 0, len(got.([]byte)), "归还后长度应重置为 0")
+	assert.Equal(t, 1024, cap(got.([]byte)), "归还后容量应保留")
+}
+
+// TestPutPooledBuf_LargeBufferDiscarded 超过容量上限的 buffer 被丢弃不回池
+func TestPutPooledBuf_LargeBufferDiscarded(t *testing.T) {
+	var pool sync.Pool
+
+	// 构造超过 maxPooledBufferCap 的大 buffer
+	buf := make([]byte, 0, maxPooledBufferCap+1)
+	putPooledBuf(&pool, buf)
+
+	assert.Nil(t, pool.Get(), "超限 buffer 不应回池")
+}
+
+// TestPutPooledBuf_BoundaryAtCap 边界：容量恰好等于上限时应正常归还
+func TestPutPooledBuf_BoundaryAtCap(t *testing.T) {
+	var pool sync.Pool
+
+	buf := make([]byte, 0, maxPooledBufferCap)
+	putPooledBuf(&pool, buf)
+
+	assert.NotNil(t, pool.Get(), "容量等于上限的 buffer 应正常归还")
+}
+
+// TestPutByteBuf_GlobalPool 验证 putByteBuf 委托到全局 bytePool 且超限丢弃
+// 注：bytePool 带 New 兜底且被全包测试共享，Get 结果不可靠，
+// 故仅通过调用不 panic + 大 buffer 丢弃行为（独立验证）间接覆盖，委托正确性由编译保证
+func TestPutByteBuf_GlobalPool(t *testing.T) {
+	small := make([]byte, 0, 512)
+	assert.NotPanics(t, func() { putByteBuf(small) })
+
+	large := make([]byte, 0, maxPooledBufferCap+1)
+	assert.NotPanics(t, func() { putByteBuf(large) }, "超限 buffer 丢弃不应 panic")
+}
+
+// TestPutPooledBuf_AppendGrowthDiscarded 模拟真实场景：append 撑大后归还应丢弃
+func TestPutPooledBuf_AppendGrowthDiscarded(t *testing.T) {
+	var pool sync.Pool
+
+	// 小 buffer 起始，append 大量数据撑大容量（模拟超长日志/堆栈）
+	// 注意：append 扩容可能恰好对齐到上限，故多写 1 字节确保超限
+	buf := make([]byte, 0, 512)
+	buf = append(buf, make([]byte, maxPooledBufferCap+1)...)
+	assert.Greater(t, cap(buf), maxPooledBufferCap, "append 后容量应超过上限")
+
+	putPooledBuf(&pool, buf)
+	assert.Nil(t, pool.Get(), "被 append 撑大的 buffer 应丢弃不回池")
 }

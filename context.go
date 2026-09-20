@@ -111,7 +111,7 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 
 	buf := contextPool.Get().([]byte)
 	buf = buf[:0]
-	defer contextPool.Put(buf)
+	defer putPooledBuf(&contextPool, buf)
 
 	buf = append(buf, '[')
 

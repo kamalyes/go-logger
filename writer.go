@@ -993,7 +993,7 @@ func (w *AsyncBatchWriter) flushLoop() {
 		// 逐条写入底层输出器（底层通常有 bufio 缓冲，合并写入无额外收益）
 		for _, p := range batch {
 			w.underlying.Write(p)
-			w.pool.Put(p[:0]) // 归还到 pool
+			putPooledBuf(&w.pool, p) // 归还到 pool（容量超限丢弃）
 		}
 		batch = batch[:0]
 	}
@@ -1066,7 +1066,7 @@ func (w *AsyncBatchWriter) Write(p []byte) (n int, err error) {
 	default:
 		// channel 满，降级为同步写入（不丢日志）
 		w.underlying.Write(buf)
-		w.pool.Put(buf[:0])
+		putPooledBuf(&w.pool, buf)
 	}
 
 	w.stats.addBytes(int64(len(p)))
