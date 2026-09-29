@@ -77,8 +77,6 @@ var (
 	errorPrefixColor = []byte("\033[31m❌ [ERROR]\033[0m ")
 	fatalPrefixColor = []byte("\033[35m💀 [FATAL]\033[0m ")
 
-	newline = []byte("\n")
-
 	// 键值对日志的常量字符串
 	kvSeparator  = []byte(": ")
 	kvDelimiter  = []byte(", ")
@@ -178,30 +176,39 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
-		if file, line, funcName := l.findExternalCaller(); file != "" {
+		if ci := l.findExternalCaller(); ci != nil {
 			buf = append(buf, '[')
-			buf = append(buf, file...)
+			buf = append(buf, ci.file...)
 			buf = append(buf, ':')
-			buf = strconv.AppendInt(buf, int64(line), 10)
+			buf = strconv.AppendInt(buf, int64(ci.line), 10)
 			buf = append(buf, ':')
-			buf = append(buf, funcName...)
+			buf = append(buf, ci.funcName...)
 			buf = append(buf, ']', ' ')
 		}
 	}
 	return buf
 }
 
-// writeTextBufLocked 将已构建好的文本条目缓冲区（含 header 与消息内容，不含换行）
-// 追加换行后加锁写入并处理 FATAL 退出。所有文本模式日志方法共享此逻辑。
-// 设计为可内联（成本远低于内联预算），避免调用开销。
-func (l *Logger) writeTextBufLocked(level LogLevel, buf []byte) {
-	buf = append(buf, newline...)
-	l.mu.Lock()
-	l.output.Write(buf)
-	l.mu.Unlock()
+// writeOut 将完整条目缓冲区写出并处理 FATAL 退出（所有日志方法的唯一出口）
+// 输出目标并发安全时（io.Discard、内置自带锁 writer）跳过互斥，消除并行热点的锁竞争
+func (l *Logger) writeOut(level LogLevel, buf []byte) {
+	if l.outLockFree {
+		l.output.Write(buf)
+	} else {
+		l.mu.Lock()
+		l.output.Write(buf)
+		l.mu.Unlock()
+	}
 	if level == FATAL {
 		os.Exit(1)
 	}
+}
+
+// writeTextBuf 将已构建好的文本条目缓冲区（含 header 与消息内容，不含换行）
+// 追加换行后写出并处理 FATAL 退出。所有文本模式日志方法共享此逻辑
+// 设计为可内联（成本远低于内联预算），避免调用开销
+func (l *Logger) writeTextBuf(level LogLevel, buf []byte) {
+	l.writeOut(level, append(buf, '\n'))
 }
 
 // ultraLog 极致优化的日志方法（使用字节池和零拷贝）
@@ -235,20 +242,20 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
-		if file, line, funcName := l.findExternalCaller(); file != "" {
+		if ci := l.findExternalCaller(); ci != nil {
 			buf = append(buf, '[')
-			buf = append(buf, file...)
+			buf = append(buf, ci.file...)
 			buf = append(buf, ':')
-			buf = strconv.AppendInt(buf, int64(line), 10)
+			buf = strconv.AppendInt(buf, int64(ci.line), 10)
 			buf = append(buf, ':')
-			buf = append(buf, funcName...)
+			buf = append(buf, ci.funcName...)
 			buf = append(buf, ']', ' ')
 		}
 	}
 
 	// 添加消息
 	buf = append(buf, msg...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }
 
 // writeJSONEntry 输出 JSON 格式日志条目（map fields 版）
@@ -303,36 +310,28 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string) []byte
 	buf = appendJSONString(buf, msg)
 
 	// caller（如果启用）- 用循环回溯找到第一个 go-logger 包外的调用者
+	// 直接拼接缓存中预转义的 file:line 与函数名片段，零转义扫描
 	if l.showCaller.Load() {
-		if file, line, funcName := l.findExternalCaller(); file != "" {
+		if ci := l.findExternalCaller(); ci != nil {
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, l.callerKey)
 			buf = append(buf, '"')
-			buf = appendJSONStringContent(buf, file)
-			buf = append(buf, ':')
-			buf = strconv.AppendInt(buf, int64(line), 10)
-			buf = append(buf, '"')
-			buf = append(buf, ',')
+			buf = append(buf, ci.fileLineJSON...)
+			buf = append(buf, '"', ',')
 			buf = appendJSONKey(buf, "callerfunc")
-			buf = appendJSONString(buf, funcName)
+			buf = append(buf, '"')
+			buf = append(buf, ci.funcNameJSON...)
+			buf = append(buf, '"')
 		}
 	}
 
 	return buf
 }
 
-// writeJSONTail 收尾 JSON 条目（'}' 换行）并加锁写出、处理 FATAL 退出
+// writeJSONTail 收尾 JSON 条目（'}' 换行）并写出、处理 FATAL 退出
 // buf 为完整条目缓冲（buf 之后不再使用，tail 内的 append 无需回传调用方）
 func (l *Logger) writeJSONTail(level LogLevel, buf []byte) {
-	buf = append(buf, '}', '\n')
-
-	l.mu.Lock()
-	l.output.Write(buf)
-	l.mu.Unlock()
-
-	if level == FATAL {
-		os.Exit(1)
-	}
+	l.writeOut(level, append(buf, '}', '\n'))
 }
 
 // ultraLogWithFields 带额外 fields 的日志方法
@@ -374,7 +373,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }
 
 // extractContextFields 从上下文提取信息为 map（用于 JSON 输出）
@@ -402,8 +401,32 @@ func appendJSONKey(buf []byte, key string) []byte {
 	return buf
 }
 
+// jsonNeedsEscape 标记需要 JSON 转义的字节（控制字符、双引号、反斜杠），
+// 数组直接索引代替 switch 多分支比较，扫描一个字节仅需一次加载加判断
+var jsonNeedsEscape = func() (t [256]bool) {
+	for i := range t {
+		t[i] = i < 0x20
+	}
+	t['"'] = true
+	t['\\'] = true
+	return t
+}()
+
 // appendJSONStringContent 追加 JSON 字符串内容（不带引号，带转义处理）
+// 快速路径：先整串扫描，无转义字节时单次 append 拷贝（memmove），
+// 消除逐字节 switch 分派加逐字节 append 的双重开销；命中转义字节后退回慢路径
 func appendJSONStringContent(buf []byte, s string) []byte {
+	for i := 0; i < len(s); i++ {
+		if jsonNeedsEscape[s[i]] {
+			buf = append(buf, s[:i]...)
+			return appendJSONStringContentSlow(buf, s[i:])
+		}
+	}
+	return append(buf, s...)
+}
+
+// appendJSONStringContentSlow 慢路径：从首个需转义字节起逐字节处理（含转义字节自身）
+func appendJSONStringContentSlow(buf []byte, s string) []byte {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch c {
@@ -491,37 +514,52 @@ type callerInfo struct {
 	file     string
 	line     int
 	funcName string
+	// JSON 路径预转义片段：file:line（含行号）与函数名各构建一次，
+	// 热路径单次 append 拷贝，免除每条日志对完整路径与函数名（约 125 字节）的逐字节转义扫描
+	fileLineJSON []byte
+	funcNameJSON []byte
 }
 
 // callerCache 按调用者 PC 缓存调用者信息
 // 同一调用点的 PC 固定不变，首次遍历栈后缓存，后续调用零分配命中缓存
 var callerCache sync.Map
 
-// findExternalCaller 回溯调用栈，找到第一个不在 go-logger/reflect/testing/runtime 内的调用者
+// findExternalCaller 回溯调用栈，返回第一个不在 go-logger/reflect/testing/runtime 内的调用者缓存信息
+// 未找到（罕见，如全部帧均来自内部包）返回 nil
 // 优化策略：
-//  1. 用 runtime.Callers 一次性获取所有 PC（替代循环 runtime.Caller）
+//  1. 两级容量：go-logger 内部帧最深不超过数层，外部调用者几乎总在前几帧出现，
+//     先走浅层 6 帧避免 runtime.Callers 回溯完整深栈（testing/框架调用链深达数十帧，
+//     帧数越多 pcvalue 内联展开成本越高）；浅层装满仍未命中时再全量回退
 //  2. 用文件路径判断内部调用者（避免 runtime.FuncForPC().Name() 的字符串分配）
 //  3. 仅对外部调用者调用 .Name()（从 2-3 次分配降至 1 次）
-//  4. 按 PC 缓存结果（热路径零分配）
-func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
+//  4. 按 PC 缓存结果与预转义 JSON 片段（热路径零分配、零转义扫描）
+func (l *Logger) findExternalCaller() *callerInfo {
 	// 栈上数组，无需 Pool，无堆分配
-	// 容量 12：内部帧（logWithKV/writeJSONEntry/appendJSONHeader 等）最深不超过数层，
-	// 外部调用者通常在 1~4 帧内出现；12 帧既覆盖最深内部路径又比 32 帧少 copy 60%+ 栈
 	var pcs [12]uintptr
-	n := runtime.Callers(3, pcs[:])
+	n := runtime.Callers(3, pcs[:6])
+	if ci := resolveExternalCaller(pcs[:n]); ci != nil {
+		return ci
+	}
+	if n == 6 { // 浅层装满：调用链比预期深，全量回退兜底
+		n = runtime.Callers(3, pcs[:])
+		if ci := resolveExternalCaller(pcs[:n]); ci != nil {
+			return ci
+		}
+	}
+	return nil
+}
 
-	for i := 0; i < n; i++ {
-		pc := pcs[i]
-
-		// 快速路径：缓存命中（sync.Map.Load 无分配）
-		// 内部帧以哨兵（file 为空）缓存，稳态下内部帧同样零成本跳过，
-		// 避免每条日志对内部帧重复 FuncForPC+FileLine+路径比较
+// resolveExternalCaller 在给定 PC 列表中定位第一个外部调用者
+// 快速路径：缓存命中（sync.Map.Load 无分配）；内部帧以哨兵（file 为空）缓存，
+// 稳态下内部帧同样零成本跳过，避免每条日志对内部帧重复 FuncForPC+FileLine+路径比较
+func resolveExternalCaller(pcs []uintptr) *callerInfo {
+	for _, pc := range pcs {
 		if cached, ok := callerCache.Load(pc); ok {
 			ci := cached.(*callerInfo)
 			if ci.file == "" {
 				continue // 哨兵：已判定为内部帧
 			}
-			return ci.file, ci.line, ci.funcName
+			return ci
 		}
 
 		// 未缓存：获取 *Func（无分配），用 FileLine 拿文件路径（无字符串分配）
@@ -544,12 +582,23 @@ func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
 			f = strings.ReplaceAll(f, `\`, `/`)
 		}
 
-		// 缓存结果（每个调用点只分配一次）
-		ci := &callerInfo{file: f, line: ln, funcName: name}
+		// 预构建 JSON 转义片段（file:line 已含行号，写出时直接拼接）
+		fileLineJSON := appendJSONStringContent(nil, f)
+		fileLineJSON = append(fileLineJSON, ':')
+		fileLineJSON = strconv.AppendInt(fileLineJSON, int64(ln), 10)
+		funcNameJSON := appendJSONStringContent(nil, name)
+
+		ci := &callerInfo{
+			file:         f,
+			line:         ln,
+			funcName:     name,
+			fileLineJSON: fileLineJSON,
+			funcNameJSON: funcNameJSON,
+		}
 		callerCache.Store(pc, ci)
-		return f, ln, name
+		return ci
 	}
-	return "", 0, ""
+	return nil
 }
 
 // internalCallerSentinel 内部帧缓存哨兵（file 为空，命中即跳过该帧）
@@ -933,15 +982,20 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }
 
 // appendKVPairsJSON 将键值对参数直写为 JSON 顶层字段（零 map 分配）
 // 奇数个参数时落单的 key 输出 "<missing>" 值，与 text 模式语义一致
+// key 的 string 断言内联在循环内：省去每对 KV 的函数调用（fmt.Sprint 罕见分支会阻碍内联）
 func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 	for i := 0; i < len(keysAndValues); i += 2 {
 		buf = append(buf, ',')
-		buf = appendJSONKeyAny(buf, keysAndValues[i])
+		if k, ok := keysAndValues[i].(string); ok {
+			buf = appendJSONKey(buf, k)
+		} else {
+			buf = appendJSONKey(buf, fmt.Sprint(keysAndValues[i]))
+		}
 		if i+1 < len(keysAndValues) {
 			buf = appendJSONValue(buf, keysAndValues[i+1])
 		} else {
@@ -949,14 +1003,6 @@ func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 		}
 	}
 	return buf
-}
-
-// appendJSONKeyAny 追加 JSON 键（任意类型：string 直用，其他类型经 fmt.Sprint 转换，罕见路径允许分配）
-func appendJSONKeyAny(buf []byte, key any) []byte {
-	if k, ok := key.(string); ok {
-		return appendJSONKey(buf, k)
-	}
-	return appendJSONKey(buf, fmt.Sprint(key))
 }
 
 // logWithFields 使用字段映射记录日志
@@ -997,7 +1043,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	}
 
 	buf = append(buf, kvBraceClose...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }
 
 // logWithContextKV 带上下文的键值对日志
@@ -2057,7 +2103,7 @@ func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, 
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msgBuf...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }
 
 // logSpecial 记录特殊类型的日志（无 context）
@@ -2275,5 +2321,5 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 		buf = append(buf, contextInfo...)
 	}
 	buf = append(buf, msgBuf...)
-	l.writeTextBufLocked(level, buf)
+	l.writeTextBuf(level, buf)
 }

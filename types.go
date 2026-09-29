@@ -61,8 +61,9 @@ type Logger struct {
 	batchTimeout time.Duration
 
 	// 输出和同步
-	output io.Writer
-	mu     sync.Mutex // 保护并发写入
+	output      io.Writer
+	outLockFree bool       // 输出目标自带并发安全（内置 writer / io.Discard）时热路径免互斥
+	mu          sync.Mutex // 保护非并发安全输出的写入
 
 	// 内部组件
 	logger     *log.Logger
@@ -157,6 +158,22 @@ func (s *LoggerStats) GetStats() *LoggerStats {
 // Logger 构造函数
 // ============================================================================
 
+// concurrentSafeWriter 标记 Write 已自带并发安全（内部持锁或无状态丢弃），
+// Logger 输出路径遇到此标记时跳过外层互斥，消除并行写日志的锁竞争
+type concurrentSafeWriter interface {
+	concurrentSafeMarker()
+}
+
+// isConcurrentSafeOutput 判断输出目标是否无需 Logger 外层互斥：
+// 内置 writer（自带锁）与 io.Discard（无状态）为安全；其余（os.Stdout、用户自定义 writer）保守视为不安全，维持加锁语义
+func isConcurrentSafeOutput(w io.Writer) bool {
+	if w == io.Discard {
+		return true
+	}
+	_, ok := w.(concurrentSafeWriter)
+	return ok
+}
+
 // NewLogger 创建新的日志记录器（默认配置）
 func NewLogger() *Logger {
 	l := &Logger{
@@ -176,6 +193,7 @@ func NewLogger() *Logger {
 		batchSize:      100,
 		batchTimeout:   100 * time.Millisecond,
 		output:         os.Stdout,
+		outLockFree:    false, // os.Stdout 并发安全未受保证，保守加锁
 		logger:         log.New(os.Stdout, "", log.LstdFlags),
 		contextKeys:    append([]compiledContextKey(nil), defaultCompiledContextKeys...),
 		stats:          NewLoggerStats(),
@@ -221,6 +239,7 @@ func (l *Logger) WithColorful(colorful bool) *Logger {
 // WithOutput 设置输出目标
 func (l *Logger) WithOutput(output io.Writer) *Logger {
 	l.output = output
+	l.outLockFree = isConcurrentSafeOutput(output)
 	l.logger = log.New(output, l.prefix, log.LstdFlags)
 	return l
 }
@@ -365,6 +384,7 @@ func (l *Logger) Clone() ILogger {
 	newLogger.batchSize = l.batchSize
 	newLogger.batchTimeout = l.batchTimeout
 	newLogger.output = l.output
+	newLogger.outLockFree = l.outLockFree
 	newLogger.logger = l.logger
 	newLogger.formatter = l.formatter
 	newLogger.writers = l.writers

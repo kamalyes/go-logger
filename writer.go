@@ -1118,3 +1118,16 @@ func (w *AsyncBatchWriter) IsHealthy() bool {
 func (w *AsyncBatchWriter) GetStats() WriterStatsSnapshot {
 	return w.stats.getSnapshot()
 }
+
+// ============================================================================
+// 并发安全标记：内置 writer 的 Write 均自带互斥（或无状态/经 channel 串行化），
+// Logger 外层据此跳过互斥锁（见 types.go isConcurrentSafeOutput）
+// ============================================================================
+
+func (w *consoleLogWriter) concurrentSafeMarker() {}
+func (w *FileLogWriter) concurrentSafeMarker()    {}
+func (w *RotateLogWriter) concurrentSafeMarker()  {}
+func (w *BufferedWriter) concurrentSafeMarker()   {}
+func (w *MultiLogWriter) concurrentSafeMarker()   {}
+func (w *AsyncBatchWriter) concurrentSafeMarker() {}
+func (w *EmptyWriter) concurrentSafeMarker()      {}

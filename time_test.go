@@ -95,7 +95,7 @@ func TestAppendRFC3339Nano_LocalCacheParity(t *testing.T) {
 	}
 
 	// 缓存污染自愈：预置过期秒的缓存项，下一次调用应 miss 重算而非使用脏前缀
-	stale := &rfc3339Second{sec: 12345, offset: 0}
+	stale := &rfc3339Second{sec: 12345}
 	copy(stale.prefix[:], "9999-99-99T99:99:99") // 非法前缀，若被使用必然断言失败
 	rfc3339SecondCache.Store(stale)
 	ts := base.Add(3 * time.Second)
