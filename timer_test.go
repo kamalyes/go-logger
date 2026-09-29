@@ -300,9 +300,12 @@ func (s *TimerTestSuite) TestTimerPrecision() {
 	time.Sleep(100 * time.Millisecond)
 	duration := timer.End()
 
-	// 允许一定的误差范围（±10ms）
+	// 允许一定的误差范围
+	// Windows 默认定时器精度约 15.6ms：100ms 睡眠向上取整到时钟节拍（7 节拍 ≈ 109.4ms）
+	// 再叠加调度延迟，实际可达 110ms+；-race 检测器进一步放大抖动。
+	// 下限保持 90ms（保证确实睡眠了），上限放宽到 130ms 以消除平台性抖动
 	assert.True(s.T(), duration >= 90*time.Millisecond)
-	assert.True(s.T(), duration <= 110*time.Millisecond)
+	assert.True(s.T(), duration <= 130*time.Millisecond)
 }
 
 // TestTimerMultipleLogs 测试多次日志记录

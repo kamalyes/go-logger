@@ -881,14 +881,14 @@ func (w *MultiLogWriter) GetStats() WriterStatsSnapshot {
 type AsyncBatchWriter struct {
 	baseWriter
 	underlying    IWriter            // 底层输出器（实际写入目标）
-	ch            chan []byte        // 日志条目通道
+	ch            chan *[]byte       // 日志条目通道（池化 buffer 指针，入队零装箱）
 	batchSize     int                // 批量写入阈值（条数）
 	flushInterval time.Duration      // 定时 flush 间隔
 	done          chan struct{}      // 关闭信号
 	flushCh       chan chan struct{} // flush 请求/响应通道
 	wg            sync.WaitGroup     // 等待 flush goroutine 退出
 	closeOnce     sync.Once          // 确保 Close 只执行一次
-	pool          sync.Pool          // 复用 []byte 减少 GC 压力
+	pool          sync.Pool          // 复用 *[]byte 减少 GC 压力（指针形态，Put 零装箱）
 	healthyAtomic int32              // 健康状态（atomic bool: 0=false, 1=true）
 }
 
@@ -924,7 +924,7 @@ func WithAsyncFlushInterval(interval time.Duration) AsyncBatchWriterOption {
 func WithAsyncChannelSize(size int) AsyncBatchWriterOption {
 	return func(w *AsyncBatchWriter) {
 		if size > 0 {
-			w.ch = make(chan []byte, size)
+			w.ch = make(chan *[]byte, size)
 		}
 	}
 }
@@ -957,11 +957,14 @@ func NewAsyncBatchWriter(opts ...AsyncBatchWriterOption) *AsyncBatchWriter {
 		},
 		batchSize:     100,
 		flushInterval: 100 * time.Millisecond,
-		ch:            make(chan []byte, 4096),
+		ch:            make(chan *[]byte, 4096),
 		done:          make(chan struct{}),
 		flushCh:       make(chan chan struct{}, 1),
 		pool: sync.Pool{
-			New: func() any { return make([]byte, 0, 4096) },
+			New: func() any {
+				p := make([]byte, 0, 4096)
+				return &p
+			},
 		},
 	}
 
@@ -984,16 +987,16 @@ func (w *AsyncBatchWriter) flushLoop() {
 	ticker := time.NewTicker(w.flushInterval)
 	defer ticker.Stop()
 
-	batch := make([][]byte, 0, w.batchSize)
+	batch := make([]*[]byte, 0, w.batchSize)
 
 	flush := func() {
 		if len(batch) == 0 {
 			return
 		}
 		// 逐条写入底层输出器（底层通常有 bufio 缓冲，合并写入无额外收益）
-		for _, p := range batch {
-			w.underlying.Write(p)
-			putPooledBuf(&w.pool, p) // 归还到 pool（容量超限丢弃）
+		for _, h := range batch {
+			w.underlying.Write(*h)
+			putPooledBuf(&w.pool, h, *h) // 归还到 pool（容量超限丢弃）
 		}
 		batch = batch[:0]
 	}
@@ -1056,17 +1059,18 @@ func (w *AsyncBatchWriter) Write(p []byte) (n int, err error) {
 		return 0, fmt.Errorf("async batch writer is not healthy")
 	}
 
-	// 复制到池化 buffer（调用方可能复用 p）
-	buf := w.pool.Get().([]byte)
-	buf = append(buf[:0], p...)
+	// 复制到池化 buffer（调用方可能复用 p），指针形态入队零装箱
+	h := w.pool.Get().(*[]byte)
+	buf := append((*h)[:0], p...)
+	*h = buf // 写回句柄：append 产生新 slice header，入队的是指针，接收方按 *h 读取
 
 	select {
-	case w.ch <- buf:
+	case w.ch <- h:
 		// 成功入队
 	default:
 		// channel 满，降级为同步写入（不丢日志）
 		w.underlying.Write(buf)
-		putPooledBuf(&w.pool, buf)
+		putPooledBuf(&w.pool, h, buf)
 	}
 
 	w.stats.addBytes(int64(len(p)))

@@ -12,6 +12,8 @@ package logger
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/metadata"
@@ -109,9 +111,9 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 		return ""
 	}
 
-	buf := contextPool.Get().([]byte)
-	buf = buf[:0]
-	defer putPooledBuf(&contextPool, buf)
+	p := contextPool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&contextPool, p, buf) }()
 
 	buf = append(buf, '[')
 
@@ -191,6 +193,75 @@ func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledCo
 		return nil
 	}
 	return fields
+}
+
+// appendContextFieldsJSON 将 ctx 字段直写为 JSON 顶层字段（零 map 分配）
+// 与 extractContextFields 语义一致（contextExtractor 降级 / OTel traceId 单一真相源），
+// 区别在于：kv 非空时跳过与 KV 同名的 key（KV 优先级高于 ctx，与 map 合并覆盖语义一致），
+// 由调用方在 ctx 之后写入 KV 值
+func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []any) []byte {
+	if ctx == nil {
+		return buf
+	}
+	if l.contextExtractor != nil {
+		info := l.contextExtractor(ctx)
+		if info = strings.TrimSpace(info); info != "" {
+			if !kvContainsKey(kv, "context") {
+				buf = append(buf, ',')
+				buf = appendJSONKey(buf, "context")
+				buf = appendJSONValue(buf, info)
+			}
+		}
+		return buf
+	}
+
+	var md mdCache
+	// traceId 始终从 OTel span 提取（单一真相源），独立于 keys 配置
+	// 即使 keys 为空或不含 trace_id，也输出 traceId，保证全链路日志打通
+	otelTraceID := extractOTelTraceID(ctx)
+	traceIDHandled := false
+	if otelTraceID != "" {
+		if !kvContainsKey(kv, ContextKeyTraceID) {
+			buf = append(buf, ',')
+			buf = appendJSONKey(buf, ContextKeyTraceID)
+			buf = appendJSONValue(buf, otelTraceID)
+		}
+		// 无论是否写出（KV 提供同名时跳过），trace_id 均视为已处理，避免 keys 循环重复写
+		traceIDHandled = true
+	}
+
+	for _, key := range l.contextKeys {
+		// trace_id 已由 OTel 写入或由 KV 提供，跳过
+		if key.key == ContextKeyTraceID && traceIDHandled {
+			continue
+		}
+		value := extractKeyValue(ctx, key, otelTraceID, &md)
+		if value == "" || kvContainsKey(kv, key.key) {
+			continue
+		}
+		buf = append(buf, ',')
+		buf = append(buf, '"')
+		buf = append(buf, key.keyBytes...)
+		buf = append(buf, '"', ':')
+		buf = appendJSONValue(buf, value)
+	}
+
+	return buf
+}
+
+// kvContainsKey 报告键值对参数中是否已提供指定 key（KV 优先判重用）
+// string key 直接比较零分配；非 string key 经 fmt.Sprint 转换后比较（罕见路径允许分配）
+func kvContainsKey(kv []any, key string) bool {
+	for i := 0; i < len(kv); i += 2 {
+		if k, ok := kv[i].(string); ok {
+			if k == key {
+				return true
+			}
+		} else if fmt.Sprint(kv[i]) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // WithContextKeys 配置 Logger 在记录 Context 日志时提取哪些 key

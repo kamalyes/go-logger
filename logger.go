@@ -31,33 +31,35 @@ const (
 	maxPooledBufferCap   = 16 * 1024 // 池中保留 buffer 的最大容量上限
 )
 
-// putPooledBuf 归还 buffer 到对象池；容量超过 maxPooledBufferCap 的 buffer 直接丢弃（交由 GC 回收）
-// 背景：个别超大日志（长堆栈、大 payload）会把 buffer append 撑大，无条件归还会让
-// 大 buffer 永久驻留在 sync.Pool 的 per-P 缓存中；高并发突发时驻留量 = P 数 × 大 buffer，
-// 生产环境曾因此观察到 bytePool 驻留 56MB+（pprof inuse 归因 init.func2）
-func putPooledBuf(pool *sync.Pool, buf []byte) {
+// putPooledBuf 归还 buffer 到对象池（指针形态：pool 存 *[]byte，Put 零装箱分配）
+// p 为 Get 时返回的指针句柄，buf 为构建完成的最终切片（可能已 append 扩容）：
+// 未超限时将 buf 重置为 len=0 后连同指针一起放回池中；容量超过 maxPooledBufferCap 的
+// buffer 直接丢弃（交由 GC 回收）背景：个别超大日志（长堆栈、大 payload）会把 buffer
+// append 撑大，无条件归还会让大 buffer 永久驻留在 sync.Pool 的 per-P 缓存中；
+// 高并发突发时驻留量 = P 数 × 大 buffer，生产环境曾因此观察到 bytePool 驻留 56MB+
+// 注意：调用方必须通过 defer 闭包归还（defer func(){ putPooledBuf(...) }()），
+// 以捕获 buf 扩容后的最终值；直接 defer putPooledBuf(...) 会在 defer 语句处提前求值
+func putPooledBuf(pool *sync.Pool, p *[]byte, buf []byte) {
 	if cap(buf) > maxPooledBufferCap {
 		return
 	}
-	pool.Put(buf[:0])
+	*p = buf[:0]
+	pool.Put(p)
 }
 
-// putByteBuf 归还 buffer 到 bytePool（容量超限丢弃）
-func putByteBuf(buf []byte) {
-	putPooledBuf(&bytePool, buf)
-}
-
-// 字节池 - 用于日志消息构建
+// 字节池 - 用于日志消息构建（存 *[]byte 指针，Put 零装箱分配）
 var bytePool = sync.Pool{
 	New: func() any {
-		return make([]byte, 0, maxLogMessageSize)
+		p := make([]byte, 0, maxLogMessageSize)
+		return &p
 	},
 }
 
-// 上下文信息池 - 用于构建上下文字符串
+// 上下文信息池 - 用于构建上下文字符串（存 *[]byte 指针，Put 零装箱分配）
 var contextPool = sync.Pool{
 	New: func() any {
-		return make([]byte, 0, estimatedContextSize)
+		p := make([]byte, 0, estimatedContextSize)
+		return &p
 	},
 }
 
@@ -164,7 +166,7 @@ func New() *Logger {
 // 注意：此函数成本较高无法内联，故 ultraLog 的纯文本路径保留内联实现以减少调用开销
 func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 	// 添加时间戳
-	buf = time.Now().AppendFormat(buf, l.timeFormat)
+	buf = l.appendTimestamp(buf)
 
 	// 添加前缀（如果有）
 	if l.prefix != "" {
@@ -216,12 +218,12 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	}
 
 	// 文本路径：内联构建完整条目
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
-	defer putByteBuf(buf)
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	// 添加时间戳
-	buf = time.Now().AppendFormat(buf, l.timeFormat)
+	buf = l.appendTimestamp(buf)
 
 	// 添加前缀（如果有）
 	if l.prefix != "" {
@@ -249,21 +251,36 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	l.writeTextBufLocked(level, buf)
 }
 
-// writeJSONEntry 输出 JSON 格式日志条目
+// writeJSONEntry 输出 JSON 格式日志条目（map fields 版）
 // traceId 等上下文字段、KV 字段都会作为 JSON 顶层字段输出，便于日志收集系统（如 openobserve）索引
+// 供已持有 map 的低频调用方使用；热路径（logWithKV/logWithContextKV）直写 KV 不经此处
 func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]any) {
 	// 使用有序键值对构建，避免 map 遍历顺序不稳定
 	// 同时复用 bytePool 减少分配
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
-	defer putByteBuf(buf)
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = append(buf, '{')
+	buf = l.appendJSONHeader(buf, level, msg)
 
+	// 额外 fields（traceId、KV 等）
+	for k, v := range fields {
+		buf = append(buf, ',')
+		buf = appendJSONKey(buf, k)
+		buf = appendJSONValue(buf, v)
+	}
+
+	l.writeJSONTail(level, buf)
+}
+
+// appendJSONHeader 追加 JSON 条目骨架（timestamp/level/prefix/msg/caller，不含开头 '{'）
+// 供 writeJSONEntry 与 KV 直写路径共享，保证字段顺序一致
+func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string) []byte {
 	// timestamp
 	buf = appendJSONKey(buf, l.timestampKey)
 	buf = append(buf, '"')
-	buf = time.Now().AppendFormat(buf, l.timeFormat)
+	buf = l.appendTimestamp(buf)
 	buf = append(buf, '"')
 
 	// level
@@ -301,13 +318,12 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 		}
 	}
 
-	// 额外 fields（traceId、KV 等）
-	for k, v := range fields {
-		buf = append(buf, ',')
-		buf = appendJSONKey(buf, k)
-		buf = appendJSONValue(buf, v)
-	}
+	return buf
+}
 
+// writeJSONTail 收尾 JSON 条目（'}' 换行）并加锁写出、处理 FATAL 退出
+// buf 为完整条目缓冲（buf 之后不再使用，tail 内的 append 无需回传调用方）
+func (l *Logger) writeJSONTail(level LogLevel, buf []byte) {
 	buf = append(buf, '}', '\n')
 
 	l.mu.Lock()
@@ -338,9 +354,9 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		return
 	}
 
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
-	defer putByteBuf(buf)
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -489,15 +505,22 @@ var callerCache sync.Map
 //  4. 按 PC 缓存结果（热路径零分配）
 func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
 	// 栈上数组，无需 Pool，无堆分配
-	var pcs [32]uintptr
+	// 容量 12：内部帧（logWithKV/writeJSONEntry/appendJSONHeader 等）最深不超过数层，
+	// 外部调用者通常在 1~4 帧内出现；12 帧既覆盖最深内部路径又比 32 帧少 copy 60%+ 栈
+	var pcs [12]uintptr
 	n := runtime.Callers(3, pcs[:])
 
 	for i := 0; i < n; i++ {
 		pc := pcs[i]
 
 		// 快速路径：缓存命中（sync.Map.Load 无分配）
+		// 内部帧以哨兵（file 为空）缓存，稳态下内部帧同样零成本跳过，
+		// 避免每条日志对内部帧重复 FuncForPC+FileLine+路径比较
 		if cached, ok := callerCache.Load(pc); ok {
 			ci := cached.(*callerInfo)
+			if ci.file == "" {
+				continue // 哨兵：已判定为内部帧
+			}
 			return ci.file, ci.line, ci.funcName
 		}
 
@@ -510,6 +533,7 @@ func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
 
 		// 用文件路径判断是否内部调用（无字符串分配）
 		if isInternalCallerByFile(f) {
+			callerCache.Store(pc, internalCallerSentinel) // 缓存内部帧哨兵
 			continue
 		}
 
@@ -527,6 +551,9 @@ func (l *Logger) findExternalCaller() (file string, line int, funcName string) {
 	}
 	return "", 0, ""
 }
+
+// internalCallerSentinel 内部帧缓存哨兵（file 为空，命中即跳过该帧）
+var internalCallerSentinel = &callerInfo{}
 
 // isInternalCallerByFile 根据文件路径判断是否为需要跳过的内部调用
 // 仅使用文件路径（无需函数名），避免 runtime.FuncForPC().Name() 的字符串分配
@@ -866,17 +893,23 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		}
 	}
 
-	// JSON 模式：把 KV 转为 fields map，作为 JSON 顶层字段输出
+	// JSON 模式：KV 直写到条目缓冲，零 map 分配
 	if l.format == FormatJSON {
-		fields := kvToFields(keysAndValues)
-		l.ultraLogWithFields(level, msg, fields)
+		p := bytePool.Get().(*[]byte)
+		buf := (*p)[:0]
+		defer func() { putPooledBuf(&bytePool, p, buf) }()
+
+		buf = append(buf, '{')
+		buf = l.appendJSONHeader(buf, level, msg)
+		buf = appendKVPairsJSON(buf, keysAndValues)
+		l.writeJSONTail(level, buf)
 		return
 	}
 
 	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
-	defer putByteBuf(buf)
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -903,25 +936,27 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	l.writeTextBufLocked(level, buf)
 }
 
-// kvToFields 将键值对切片转为 map[string]any
-// 用于 JSON 模式下将 KV 作为 JSON 顶层字段输出
-func kvToFields(keysAndValues []any) map[string]any {
-	if len(keysAndValues) == 0 {
-		return nil
-	}
-	fields := make(map[string]any, len(keysAndValues)/2+1)
+// appendKVPairsJSON 将键值对参数直写为 JSON 顶层字段（零 map 分配）
+// 奇数个参数时落单的 key 输出 "<missing>" 值，与 text 模式语义一致
+func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 	for i := 0; i < len(keysAndValues); i += 2 {
-		key, ok := keysAndValues[i].(string)
-		if !ok {
-			key = fmt.Sprintf("%v", keysAndValues[i])
-		}
+		buf = append(buf, ',')
+		buf = appendJSONKeyAny(buf, keysAndValues[i])
 		if i+1 < len(keysAndValues) {
-			fields[key] = keysAndValues[i+1]
+			buf = appendJSONValue(buf, keysAndValues[i+1])
 		} else {
-			fields[key] = "<missing>"
+			buf = appendJSONValue(buf, "<missing>")
 		}
 	}
-	return fields
+	return buf
+}
+
+// appendJSONKeyAny 追加 JSON 键（任意类型：string 直用，其他类型经 fmt.Sprint 转换，罕见路径允许分配）
+func appendJSONKeyAny(buf []byte, key any) []byte {
+	if k, ok := key.(string); ok {
+		return appendJSONKey(buf, k)
+	}
+	return appendJSONKey(buf, fmt.Sprint(key))
 }
 
 // logWithFields 使用字段映射记录日志
@@ -942,9 +977,9 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	}
 
 	// text 模式：在单个缓冲区中构建完整条目，避免 string(buf) 分配和二次缓冲
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
-	defer putByteBuf(buf)
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msg...)
@@ -971,21 +1006,18 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 		return
 	}
 
-	// JSON 模式：traceId 和 KV 都作为 JSON 顶层字段输出
+	// JSON 模式：ctx 字段与 KV 直写到条目缓冲，零 map 分配
+	// ctx 字段先写、跳过 KV 同名 key，KV 后写（KV 优先级高于 ctx，与 map 合并覆盖语义一致）
 	if l.format == FormatJSON {
-		fields := l.extractContextFields(ctx)
-		if len(keysAndValues) > 0 {
-			// 合并 KV 到 fields（KV 优先级高于 context）
-			if fields == nil {
-				fields = kvToFields(keysAndValues)
-			} else {
-				kvFields := kvToFields(keysAndValues)
-				for k, v := range kvFields {
-					fields[k] = v
-				}
-			}
-		}
-		l.ultraLogWithFields(level, msg, fields)
+		p := bytePool.Get().(*[]byte)
+		buf := (*p)[:0]
+		defer func() { putPooledBuf(&bytePool, p, buf) }()
+
+		buf = append(buf, '{')
+		buf = l.appendJSONHeader(buf, level, msg)
+		buf = l.appendContextFieldsJSON(buf, ctx, keysAndValues)
+		buf = appendKVPairsJSON(buf, keysAndValues)
+		l.writeJSONTail(level, buf)
 		return
 	}
 
@@ -1988,10 +2020,11 @@ var (
 )
 
 // buildSpecialMessage 构建特殊日志消息内容：emoji [NAME] format
-// 返回池化 buffer，调用方负责归还 bytePool
-func buildSpecialMessage(emoji, name, format string, args ...any) []byte {
-	buf := bytePool.Get().([]byte)
-	buf = buf[:0]
+// 返回池化 buffer 的指针句柄与内容，调用方通过
+// defer func(){ putPooledBuf(&bytePool, p, buf) }() 负责归还 bytePool
+func buildSpecialMessage(emoji, name, format string, args ...any) (p *[]byte, buf []byte) {
+	p = bytePool.Get().(*[]byte)
+	buf = (*p)[:0]
 	buf = append(buf, emoji...)
 	buf = append(buf, ' ', '[')
 	buf = append(buf, name...)
@@ -2001,7 +2034,7 @@ func buildSpecialMessage(emoji, name, format string, args ...any) []byte {
 	} else {
 		buf = append(buf, fmt.Sprintf(format, args...)...)
 	}
-	return buf
+	return p, buf
 }
 
 // logSpecialInternal 特殊日志内部实现（无 context）
@@ -2011,17 +2044,17 @@ func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, 
 		return
 	}
 
-	msgBuf := buildSpecialMessage(emoji, name, format, args...)
-	defer putByteBuf(msgBuf)
+	msgP, msgBuf := buildSpecialMessage(emoji, name, format, args...)
+	defer func() { putPooledBuf(&bytePool, msgP, msgBuf) }()
 
 	if l.format == FormatJSON {
 		l.writeJSONEntry(level, string(msgBuf), nil)
 		return
 	}
 
-	buf := bytePool.Get().([]byte)
-	defer putByteBuf(buf)
-	buf = buf[:0]
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 	buf = l.appendTextHeader(buf, level)
 	buf = append(buf, msgBuf...)
 	l.writeTextBufLocked(level, buf)
@@ -2225,8 +2258,8 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 		return
 	}
 
-	msgBuf := buildSpecialMessage(logType.emoji, logType.name, format, args...)
-	defer putByteBuf(msgBuf)
+	msgP, msgBuf := buildSpecialMessage(logType.emoji, logType.name, format, args...)
+	defer func() { putPooledBuf(&bytePool, msgP, msgBuf) }()
 
 	if l.format == FormatJSON {
 		l.writeJSONEntry(level, string(msgBuf), l.extractContextFields(ctx))
@@ -2234,9 +2267,9 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 	}
 
 	// text 模式：ctx 信息前缀到消息
-	buf := bytePool.Get().([]byte)
-	defer putByteBuf(buf)
-	buf = buf[:0]
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
 	buf = l.appendTextHeader(buf, level)
 	if contextInfo := l.extractContextInfo(ctx); contextInfo != "" {
 		buf = append(buf, contextInfo...)
