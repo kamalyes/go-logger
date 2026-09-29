@@ -130,20 +130,6 @@ func (s *TypesTestSuite) TestLoggerWithFieldKeys() {
 	assert.Equal(s.T(), "stack", logger.stacktraceKey)
 }
 
-// TestLoggerWithAsyncWrite 测试异步写入配置
-func (s *TypesTestSuite) TestLoggerWithAsyncWrite() {
-	logger := NewLogger().
-		WithAsyncWrite(true).
-		WithBufferSize(2048).
-		WithBatchSize(200).
-		WithBatchTimeout(200 * time.Millisecond)
-
-	assert.True(s.T(), logger.asyncWrite)
-	assert.Equal(s.T(), 2048, logger.bufferSize)
-	assert.Equal(s.T(), 200, logger.batchSize)
-	assert.Equal(s.T(), 200*time.Millisecond, logger.batchTimeout)
-}
-
 // TestLoggerClone 测试克隆日志器
 func (s *TypesTestSuite) TestLoggerClone() {
 	original := NewLogger().
@@ -282,7 +268,6 @@ func (s *TypesTestSuite) TestLoggerDefaultValues() {
 	assert.Equal(s.T(), FormatJSON, logger.format)
 	assert.Equal(s.T(), 2, logger.callerDepth)
 	assert.False(s.T(), logger.showStacktrace)
-	assert.False(s.T(), logger.asyncWrite)
 }
 
 // TestLoggerStatsUptime 测试运行时间统计

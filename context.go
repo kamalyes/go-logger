@@ -70,31 +70,21 @@ func compileContextKeys(keys []string) []compiledContextKey {
 	return compiled
 }
 
-// mdCache 延迟加载 gRPC incoming metadata，避免多次重复解析
-type mdCache struct {
-	md     metadata.MD
-	loaded bool
-	has    bool
-}
-
-// get 从 metadata 获取指定 key 的首个非空值（首次调用时延迟加载）
-func (c *mdCache) get(ctx context.Context, key string) string {
-	if !c.loaded {
-		c.md, c.has = metadata.FromIncomingContext(ctx)
-		c.loaded = true
-	}
-	if !c.has {
-		return ""
-	}
-	if values := c.md.Get(key); len(values) > 0 && values[0] != "" {
-		return values[0]
+// valueFromIncomingMetadata 从 gRPC incoming metadata 获取指定 key 的首个非空值（大小写不敏感）
+// 使用 ValueFromIncomingContext 而非 FromIncomingContext：后者每次调用深拷贝整个 MD
+// （map 结构 + 所有 key 的 value slice），是线上 heap profile 中 context 提取路径的
+// 主要分配来源（压测观测到该路径持续分配）；前者仅拷贝命中
+// key 的单个 value slice，map 本身零分配。查询是只读的，无需持有 MD 副本
+func valueFromIncomingMetadata(ctx context.Context, key string) string {
+	if vals := metadata.ValueFromIncomingContext(ctx, key); len(vals) > 0 && vals[0] != "" {
+		return vals[0]
 	}
 	return ""
 }
 
 // extractKeyValue 从 context 提取单个 key 的值
 // 优先级：OTel traceId（仅 trace_id key）> ctx.Value > gRPC metadata
-func extractKeyValue(ctx context.Context, key compiledContextKey, otelTraceID string, md *mdCache) string {
+func extractKeyValue(ctx context.Context, key compiledContextKey, otelTraceID string) string {
 	if key.key == ContextKeyTraceID && otelTraceID != "" {
 		return otelTraceID
 	}
@@ -103,7 +93,7 @@ func extractKeyValue(ctx context.Context, key compiledContextKey, otelTraceID st
 			return text
 		}
 	}
-	return md.get(ctx, key.key)
+	return valueFromIncomingMetadata(ctx, key.key)
 }
 
 func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextKey) string {
@@ -118,7 +108,6 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 	buf = append(buf, '[')
 
 	var (
-		md         mdCache
 		wroteField bool
 	)
 
@@ -139,7 +128,7 @@ func extractContextWithCompiledKeys(ctx context.Context, keys []compiledContextK
 		if key.key == ContextKeyTraceID && traceIDWritten {
 			continue
 		}
-		value := extractKeyValue(ctx, key, otelTraceID, &md)
+		value := extractKeyValue(ctx, key, otelTraceID)
 		if value == "" {
 			continue
 		}
@@ -167,7 +156,6 @@ func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledCo
 		return nil
 	}
 
-	var md mdCache
 	fields := make(map[string]any, len(keys)+1)
 
 	// traceId 始终从 OTel span 提取（单一真相源），独立于 keys 配置
@@ -184,7 +172,7 @@ func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledCo
 		if key.key == ContextKeyTraceID && traceIDWritten {
 			continue
 		}
-		if value := extractKeyValue(ctx, key, otelTraceID, &md); value != "" {
+		if value := extractKeyValue(ctx, key, otelTraceID); value != "" {
 			fields[key.key] = value
 		}
 	}
@@ -215,7 +203,6 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 		return buf
 	}
 
-	var md mdCache
 	// traceId 始终从 OTel span 提取（单一真相源），独立于 keys 配置
 	// 即使 keys 为空或不含 trace_id，也输出 traceId，保证全链路日志打通
 	otelTraceID := extractOTelTraceID(ctx)
@@ -235,7 +222,7 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 		if key.key == ContextKeyTraceID && traceIDHandled {
 			continue
 		}
-		value := extractKeyValue(ctx, key, otelTraceID, &md)
+		value := extractKeyValue(ctx, key, otelTraceID)
 		if value == "" || kvContainsKey(kv, key.key) {
 			continue
 		}
@@ -328,11 +315,9 @@ func ExtractTraceFromIncoming(ctx context.Context) string {
 	if id := extractOTelTraceID(ctx); id != "" {
 		return id
 	}
-	// 2. metadata fallback
-	if md, ok := metadata.FromIncomingContext(ctx); ok {
-		if vals := md.Get(ContextKeyTraceID); len(vals) > 0 && vals[0] != "" {
-			return vals[0]
-		}
+	// 2. metadata fallback（ValueFromIncomingContext 单 value 拷贝，避免全量 MD 深拷贝）
+	if id := valueFromIncomingMetadata(ctx, ContextKeyTraceID); id != "" {
+		return id
 	}
 	// 3. ctx.Value fallback
 	if v := ctx.Value(ContextKeyTraceID); v != nil {

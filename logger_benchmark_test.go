@@ -14,6 +14,8 @@ import (
 	"context"
 	"io"
 	"testing"
+
+	"google.golang.org/grpc/metadata"
 )
 
 // 创建输出到 io.Discard 的 logger，消除 I/O 开销，专注测量 logger 自身开销
@@ -109,6 +111,35 @@ func BenchmarkText_InfoKV_WithCaller(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		l.InfoKV("数据库查询", "table", "users", "rows", 42, "cost_ms", 3)
+	}
+}
+
+// ==================== gRPC metadata fallback 场景 ====================
+// 线上（apex-notify-service 5w 连接压测）heap profile 铁证：context 提取路径的
+// metadata.FromIncomingContext 全量 MD 深拷贝是 go-logger 热路径的主要分配来源。
+// 本基准模拟 gRPC 服务端请求：ctx 携带 incoming metadata（真实请求体量），
+// contextKeys 中的 key 需 fallback 到 metadata 提取，测量单条日志的完整开销
+
+func benchMetadataCtx() context.Context {
+	md := metadata.Pairs(
+		"app_id", "10001",
+		"namespace", "live",
+		"uid", "123456",
+		"authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.test-token",
+		"user-agent", "grpc-go/1.66.0",
+		"content-type", "application/grpc",
+	)
+	return metadata.NewIncomingContext(context.Background(), md)
+}
+
+func BenchmarkJSON_InfoContext_MetadataFallback(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	l.contextKeys = compileContextKeys([]string{"app_id", "namespace", "uid"})
+	ctx := benchMetadataCtx()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.InfoContext(ctx, "处理请求 method=%s path=%s", "GET", "/api/v1/users")
 	}
 }
 

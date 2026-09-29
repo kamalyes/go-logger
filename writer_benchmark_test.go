@@ -23,9 +23,21 @@ var (
 )
 
 // ==================== Console Writer 性能对比 ====================
+// 注意：对比基准使用真实临时文件（每次 Write 都是一次真实 syscall），
+// 而非 io.Discard——空写会掩盖旧架构"锁临界区内做 syscall"的真实串行成本
+
+func newBenchFile(b *testing.B) *os.File {
+	b.Helper()
+	f, err := os.CreateTemp(b.TempDir(), "console-bench-*.log")
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { f.Close() })
+	return f
+}
 
 func BenchmarkConsoleWriter_Sequential(b *testing.B) {
-	w := NewConsoleWriter(WithConsoleOutput(io.Discard))
+	w := NewConsoleWriter(WithConsoleOutput(newBenchFile(b)))
 	defer w.Close()
 
 	b.ResetTimer()
@@ -37,8 +49,36 @@ func BenchmarkConsoleWriter_Sequential(b *testing.B) {
 }
 
 func BenchmarkConsoleWriter_Parallel(b *testing.B) {
-	w := NewConsoleWriter(WithConsoleOutput(io.Discard))
+	w := NewConsoleWriter(WithConsoleOutput(newBenchFile(b)))
 	defer w.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			w.Write(testLogLine)
+		}
+	})
+}
+
+// legacySyncConsoleWriter 复刻 v0.6.3 及之前 consoleLogWriter 的串行锁架构
+// （每条日志：全局互斥锁 + 1 次底层 Write），仅用于基准对比展示异步批量管道的收益
+type legacySyncConsoleWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *legacySyncConsoleWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	n, err := l.w.Write(p)
+	l.mu.Unlock()
+	return n, err
+}
+
+// BenchmarkConsoleWriter_LegacySyncParallel 旧串行锁架构基线（对比 BenchmarkConsoleWriter_Parallel）
+func BenchmarkConsoleWriter_LegacySyncParallel(b *testing.B) {
+	w := &legacySyncConsoleWriter{w: newBenchFile(b)}
 
 	b.ResetTimer()
 	b.ReportAllocs()

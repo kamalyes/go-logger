@@ -201,8 +201,22 @@ func (l *Logger) writeOut(level LogLevel, buf []byte) {
 		l.mu.Unlock()
 	}
 	if level == FATAL {
+		// 异步输出器（如控制台批量管道）在进程退出前强制刷盘，确保遗言落地
+		if fl, ok := l.output.(interface{ Flush() error }); ok {
+			fl.Flush()
+		}
 		os.Exit(1)
 	}
+}
+
+// Flush 刷新输出目标中缓冲的日志条目
+// 异步输出器（控制台批量管道）在优雅退出链路中调用此方法，
+// 确保 SIGTERM/SIGINT 时队列中的日志不丢失
+func (l *Logger) Flush() error {
+	if fl, ok := l.output.(interface{ Flush() error }); ok {
+		return fl.Flush()
+	}
+	return nil
 }
 
 // writeTextBuf 将已构建好的文本条目缓冲区（含 header 与消息内容，不含换行）
@@ -719,7 +733,7 @@ func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, forma
 	}
 	msg := fmt.Sprintf(format, args...)
 	if l.format == FormatJSON {
-		l.ultraLogWithFields(level, msg, l.extractContextFields(ctx))
+		l.logWithContextJSON(ctx, level, msg)
 		return
 	}
 	contextInfo := l.extractContextInfo(ctx)
@@ -727,6 +741,21 @@ func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, forma
 		msg = contextInfo + msg
 	}
 	l.ultraLog(level, msg)
+}
+
+// logWithContextJSON JSON 模式下带 context 的直写条目
+// *Context 系列（Format 路径）、LogContext、LogSpecialContext 的统一出口：
+// ctx 字段经 appendContextFieldsJSON 直写条目缓冲，消除 extractContextFields 构建 map[string]any → writeJSONEntry 遍历 map 的中转（该 map 路径曾是 InfoContext 每条日志的最大分配来源）
+// caller 定位由 appendJSONHeader 自解析兜底（本方法调用方层级不一，无法像 KV 路径那样在入口做浅层定位；内部帧由 isInternalCallerByFile 过滤）
+func (l *Logger) logWithContextJSON(ctx context.Context, level LogLevel, msg string) {
+	p := bytePool.Get().(*[]byte)
+	buf := (*p)[:0]
+	defer func() { putPooledBuf(&bytePool, p, buf) }()
+
+	buf = append(buf, '{')
+	buf = l.appendJSONHeader(buf, level, msg, nil)
+	buf = l.appendContextFieldsJSON(buf, ctx, nil)
+	l.writeJSONTail(level, buf)
 }
 
 // ultraLogf 极致优化的格式化日志方法
@@ -926,9 +955,8 @@ func (l *Logger) logWithContextLines(ctx context.Context, level LogLevel, lines 
 		return
 	}
 	if l.format == FormatJSON {
-		fields := l.extractContextFields(ctx)
 		for _, line := range lines {
-			l.ultraLogWithFields(level, line, fields)
+			l.logWithContextJSON(ctx, level, line)
 		}
 		return
 	}
@@ -1296,7 +1324,7 @@ func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
 	}
 	// JSON 模式：traceId 作为 JSON 顶层字段
 	if l.format == FormatJSON {
-		l.ultraLogWithFields(level, msg, l.extractContextFields(ctx))
+		l.logWithContextJSON(ctx, level, msg)
 		return
 	}
 	contextInfo := l.extractContextInfo(ctx)
@@ -2412,7 +2440,7 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 	defer func() { putPooledBuf(&bytePool, msgP, msgBuf) }()
 
 	if l.format == FormatJSON {
-		l.writeJSONEntry(level, string(msgBuf), l.extractContextFields(ctx))
+		l.logWithContextJSON(ctx, level, string(msgBuf))
 		return
 	}
 

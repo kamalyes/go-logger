@@ -36,6 +36,10 @@ const (
 	DefaultDirPermission  = 0755                // 默认目录权限
 	DefaultMaxAge         = 30 * 24 * time.Hour // 默认最大保留时间 30天
 	DefaultBufferSize     = 4096                // 默认缓冲区大小 4KB
+
+	DefaultConsoleQueueSize     = 4096                  // 控制台输出器异步队列深度（条数）
+	DefaultConsoleBatchBytes    = 64 * 1024             // 控制台输出器合并写出字节上限（单次写出体量）
+	DefaultConsoleFlushInterval = 100 * time.Millisecond // 控制台输出器定时刷写间隔
 )
 
 // 错误消息常量

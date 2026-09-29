@@ -39,7 +39,7 @@
 - **📊 结构化日志**: 支持键值对、字段映射、对象自动解析、多行日志等多种结构化方式
 - **🔍 分布式追踪**: 基于 OpenTelemetry 的链路追踪，`trace_id` 单一真相源，自动从 OTel span 提取
 - **🎨 Console 风格**: JavaScript Console 风格的分组、表格、计时器功能
-- **🔌 灵活扩展**: 多种写入器适配器（Console、File、Rotate、Buffered、Multi、AsyncBatch）、自定义上下文提取器、格式化器、钩子、中间件
+- **🔌 灵活扩展**: 多种写入器适配器（Console、File、Rotate、Buffered、Multi）、自定义上下文提取器、格式化器、钩子、中间件
 - **⚡ 高性能**: 对象池、零拷贝、原子操作、预计算常量、数组索引替 map 等性能优化
 - **🛡️ 并发安全**: 完善的并发控制，适合高并发场景
 - **🎯 多输出格式**: 支持 Text / JSON / XML / CSV 四种输出格式
@@ -93,11 +93,11 @@
 ### 企业级功能
 
 - **🔧 灵活配置**: Builder 模式链式调用，支持运行时动态配置
-- **⚙️ 多种写入器**: Console、File、Rotate、Buffered、Multi、AsyncBatch，全部采用 Options 模式
+- **⚙️ 多种写入器**: Console（内建异步批量管道）、File、Rotate、Buffered、Multi，全部采用 Options 模式
 - **⚙️ 配置驱动创建**: `WriterConfig` + `CreateWriter` 支持通过配置统一创建 Writer
 - **🎯 错误处理**: 返回 error 的日志方法（`*Return` / `*CtxReturn` / `*KVReturn`），简化错误处理流程
 - **📊 统计分析**: `LoggerStats` 内置日志统计，`WriterStatsSnapshot` 收集写入器运行时指标
-- **🧪 完善测试**: 全面的测试覆盖与基准测试（`logger_benchmark_test.go`、`writer_benchmark_test.go`、`async_batch_test.go` 等）
+- **🧪 完善测试**: 全面的测试覆盖与基准测试（`logger_benchmark_test.go`、`writer_benchmark_test.go`、`writer_console_async_test.go` 等）
 - **🔌 接口丰富**: 定义 `ILogger` / `IWriter` / `IAdapter` / `IManager` / `IFormatter` / `IHook` / `IMiddleware` 等接口，并兼容 Zap/Logrus/slog/Zerolog 框架接口
 
 ## 🏗️ 项目结构
@@ -111,7 +111,7 @@ go-logger/
 ├── context.go                 # 上下文服务（OTel 链路追踪提取）
 ├── console.go                 # Console 风格日志（分组/表格）
 ├── timer.go                   # 计时器实现（含自动清理）
-├── writer.go                  # 写入器实现（Console/File/Rotate/Buffered/Multi/AsyncBatch）
+├── writer.go                  # 写入器实现（Console/File/Rotate/Buffered/Multi）
 ├── output.go                  # 输出类型与配置（WriterConfig + CreateWriter）
 ├── empty.go                   # 空实现（EmptyLogger/EmptyAdapter/EmptyWriter/EmptyHook）
 ├── *_test.go                  # 测试文件
@@ -538,15 +538,6 @@ multiWriter := logger.NewMultiWriter(
  logger.WithWriters(consoleWriter, fileWriter, rotateWriter),
 )
 
-// 异步批量写入器（后台 goroutine 批量 flush，高并发场景推荐）
-asyncWriter := logger.NewAsyncBatchWriter(
- logger.WithAsyncUnderlying(fileWriter),
- logger.WithAsyncBatchSize(200),
- logger.WithAsyncFlushInterval(50*time.Millisecond),
- logger.WithAsyncChannelSize(4096),
-)
-defer asyncWriter.Close() // 应用退出时务必 Close
-
 // 创建日志实例
 log := logger.NewLogger().WithOutput(multiWriter)
 log.Info("这条日志会同时输出到控制台和文件")
@@ -628,7 +619,7 @@ logger.SetGlobalShowCaller(false)
 
 ### Logger Builder 方法
 
-`WithLevel` `WithShowCaller` `WithPrefix` `WithColorful` `WithOutput` `WithTimeFormat` `WithFormat` `WithCallerDepth` `WithShowStacktrace` `WithTimestampKey` `WithLevelKey` `WithMessageKey` `WithCallerKey` `WithStacktraceKey` `WithAsyncWrite` `WithBufferSize` `WithBatchSize` `WithBatchTimeout` `WithFormatter` `WithWriters` `WithHooks` `WithMiddleware` `WithContextExtractor` `WithContextKeys`
+`WithLevel` `WithShowCaller` `WithPrefix` `WithColorful` `WithOutput` `WithTimeFormat` `WithFormat` `WithCallerDepth` `WithShowStacktrace` `WithTimestampKey` `WithLevelKey` `WithMessageKey` `WithCallerKey` `WithStacktraceKey` `WithFormatter` `WithWriters` `WithHooks` `WithMiddleware` `WithContextExtractor` `WithContextKeys`
 
 ## 🤝 社区贡献
 

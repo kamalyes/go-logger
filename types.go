@@ -55,12 +55,6 @@ type Logger struct {
 	callerKey     []byte
 	stacktraceKey string
 
-	// 异步写入配置
-	asyncWrite   bool
-	bufferSize   int
-	batchSize    int
-	batchTimeout time.Duration
-
 	// 输出和同步
 	output      io.Writer
 	outLockFree bool       // 输出目标自带并发安全（内置 writer / io.Discard）时热路径免互斥
@@ -189,10 +183,6 @@ func NewLogger() *Logger {
 		messageKey:     defaultMessageKey,
 		callerKey:      defaultCallerKey,
 		stacktraceKey:  "stacktrace",
-		asyncWrite:     false,
-		bufferSize:     0,
-		batchSize:      100,
-		batchTimeout:   100 * time.Millisecond,
 		output:         os.Stdout,
 		outLockFree:    false, // os.Stdout 并发安全未受保证，保守加锁
 		logger:         log.New(os.Stdout, "", log.LstdFlags),
@@ -299,30 +289,6 @@ func (l *Logger) WithStacktraceKey(key string) *Logger {
 	return l
 }
 
-// WithAsyncWrite 设置是否异步写入
-func (l *Logger) WithAsyncWrite(async bool) *Logger {
-	l.asyncWrite = async
-	return l
-}
-
-// WithBufferSize 设置缓冲区大小
-func (l *Logger) WithBufferSize(size int) *Logger {
-	l.bufferSize = size
-	return l
-}
-
-// WithBatchSize 设置批量写入大小
-func (l *Logger) WithBatchSize(size int) *Logger {
-	l.batchSize = size
-	return l
-}
-
-// WithBatchTimeout 设置批量写入超时时间
-func (l *Logger) WithBatchTimeout(timeout time.Duration) *Logger {
-	l.batchTimeout = timeout
-	return l
-}
-
 // WithFormatter 设置格式化器
 func (l *Logger) WithFormatter(formatter IFormatter) *Logger {
 	l.formatter = formatter
@@ -380,10 +346,6 @@ func (l *Logger) Clone() ILogger {
 	newLogger.messageKey = l.messageKey
 	newLogger.callerKey = l.callerKey
 	newLogger.stacktraceKey = l.stacktraceKey
-	newLogger.asyncWrite = l.asyncWrite
-	newLogger.bufferSize = l.bufferSize
-	newLogger.batchSize = l.batchSize
-	newLogger.batchTimeout = l.batchTimeout
 	newLogger.output = l.output
 	newLogger.outLockFree = l.outLockFree
 	newLogger.logger = l.logger

@@ -54,7 +54,10 @@ func TestConsoleWriter(t *testing.T) {
 	n, err := writer.Write([]byte("test message\n"))
 	assert.NoError(t, err)
 	assert.Equal(t, 13, n)
+	// 异步批量管道：Flush 后条目才到达输出目标
+	writer.Flush()
 	assert.Contains(t, buffer.String(), "test message")
+	writer.Close()
 }
 
 // TestConsoleWriterLevel 测试控制台输出器级别过滤
@@ -64,6 +67,7 @@ func TestConsoleWriterLevel(t *testing.T) {
 		WithConsoleOutput(buffer),
 		WithConsoleLevel(WARN),
 	)
+	defer writer.Close()
 
 	// DEBUG级别应该被过滤
 	n, err := writer.WriteLevel(DEBUG, []byte("debug message\n"))
@@ -75,6 +79,7 @@ func TestConsoleWriterLevel(t *testing.T) {
 	n, err = writer.WriteLevel(WARN, []byte("warn message\n"))
 	assert.NoError(t, err)
 	assert.Equal(t, 13, n)
+	writer.Flush()
 	assert.Contains(t, buffer.String(), "warn message")
 }
 
@@ -246,10 +251,9 @@ func TestBufferedWriter(t *testing.T) {
 	err = writer.Flush()
 	assert.NoError(t, err)
 
-	// 刷新后应该有内容
-	assert.Contains(t, buffer.String(), "test message")
-
+	// 刷新后应该有内容（Close 会经底层控制台异步管道 drain 到最终输出）
 	writer.Close()
+	assert.Contains(t, buffer.String(), "test message")
 }
 
 // TestBufferedWriterAutoFlush 测试缓冲自动刷新
@@ -265,10 +269,9 @@ func TestBufferedWriterAutoFlush(t *testing.T) {
 	// 写入超过缓冲区大小的数据
 	writer.Write([]byte("this is a long message\n"))
 
-	// 应该自动刷新
-	assert.NotEmpty(t, buffer.String())
-
+	// 应该自动刷新（Close 会经底层控制台异步管道 drain 到最终输出）
 	writer.Close()
+	assert.NotEmpty(t, buffer.String())
 }
 
 // TestMultiWriter 测试多输出器
@@ -288,7 +291,8 @@ func TestMultiWriter(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 13, n)
 
-	// 两个输出器都应该有内容
+	// 两个输出器都应该有内容（Flush 经各输出器的异步管道 drain 到最终输出）
+	multiWriter.Flush()
 	assert.Contains(t, buffer1.String(), "test message")
 	assert.Contains(t, buffer2.String(), "test message")
 

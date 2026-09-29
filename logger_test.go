@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/trace"
+	"google.golang.org/grpc/metadata"
 )
 
 // testUUID 生成测试用随机 UUID（标准库实现，零依赖）
@@ -706,4 +709,157 @@ func TestLongMessage(t *testing.T) {
 	logger.Info("%s", longMsg)
 	output := buffer.String()
 	assert.Contains(t, output, longMsg)
+}
+
+// TestLogSpecialContext 测试带 context 的特殊日志方法
+func TestLogSpecialContext(t *testing.T) {
+	// text 模式测试
+	t.Run("Text", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := NewLogger().
+			WithOutput(&buf).
+			WithFormat(FormatText).
+			WithShowCaller(false)
+
+		ctx := context.WithValue(context.Background(), ContextKeyTraceID, "trace-123")
+
+		logger.LogSpecialContext(ctx, SuccessType, INFO, "操作成功")
+		logger.LogSpecialContext(ctx, LoadingType, INFO, "正在加载")
+		logger.LogSpecialContext(ctx, DatabaseType, INFO, "DB查询耗时 %v", 50*time.Millisecond)
+
+		output := buf.String()
+		if !strings.Contains(output, "trace-123") {
+			t.Error("expected trace ID in text output")
+		}
+		if !strings.Contains(output, "✅") {
+			t.Error("expected success emoji")
+		}
+		if !strings.Contains(output, "[LOADING]") {
+			t.Error("expected LOADING tag")
+		}
+		if !strings.Contains(output, "[DATABASE]") {
+			t.Error("expected DATABASE tag")
+		}
+	})
+
+	// JSON 模式测试
+	t.Run("JSON", func(t *testing.T) {
+		var buf bytes.Buffer
+		logger := NewLogger().
+			WithOutput(&buf).
+			WithFormat(FormatJSON).
+			WithShowCaller(false)
+
+		ctx := context.WithValue(context.Background(), ContextKeyTraceID, "trace-456")
+
+		logger.LogSpecialContext(ctx, SuccessType, INFO, "JSON模式成功")
+		logger.LogSpecialContext(ctx, CacheType, INFO, "缓存命中 key=%s", "user:123")
+
+		output := buf.String()
+		if !strings.Contains(output, "trace-456") {
+			t.Error("expected trace ID in JSON output")
+		}
+		if !strings.Contains(output, "[SUCCESS]") {
+			t.Error("expected SUCCESS tag in JSON")
+		}
+		if !strings.Contains(output, "[CACHE]") {
+			t.Error("expected CACHE tag in JSON")
+		}
+	})
+}
+
+// TestInfoContextMetadataFallback 验证 InfoContext（Format 路径）从 gRPC metadata 提取字段
+// 覆盖 valueFromIncomingMetadata 直写路径：字段存在、缺失不写、大小写不敏感、JSON 结构合法
+func TestInfoContextMetadataFallback(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger().
+		WithOutput(&buf).
+		WithFormat(FormatJSON).
+		WithShowCaller(false).
+		WithContextKeys("app_id", "namespace", "uid")
+
+	md := metadata.Pairs("APP_ID", "10001", "namespace", "live")
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	logger.InfoContext(ctx, "metadata fallback")
+
+	out := strings.TrimSpace(buf.String())
+	assert.Contains(t, out, `"app_id":"10001"`, "metadata 大小写不敏感：APP_ID 应命中 app_id")
+	assert.Contains(t, out, `"namespace":"live"`)
+	assert.NotContains(t, out, `"uid"`, "metadata 缺失的 key 不应输出字段")
+	assert.NotContains(t, out, `"trace_id"`, "无 OTel/ctx.Value/metadata 来源时 trace_id 不输出")
+
+	var entry map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(out), &entry), "输出必须是合法 JSON")
+	assert.Equal(t, "10001", entry["app_id"])
+	assert.Equal(t, "live", entry["namespace"])
+}
+
+// TestInfoContextJSONNoDuplicateKeys 验证 ctx.Value 与 contextKeys 同名时字段只写一次
+// （直写路径的判重：trace_id 由 OTel 快速路径处理，不进 keys 循环重复输出）
+func TestInfoContextJSONNoDuplicateKeys(t *testing.T) {
+	var buf bytes.Buffer
+	// 默认 contextKeys 含 trace_id，ctx.Value 再提供同名值
+	logger := NewLogger().
+		WithOutput(&buf).
+		WithFormat(FormatJSON).
+		WithShowCaller(false)
+
+	ctx := context.WithValue(context.Background(), ContextKeyTraceID, "trace-abc")
+	logger.InfoContext(ctx, "dup check")
+
+	out := strings.TrimSpace(buf.String())
+	assert.Equal(t, 1, strings.Count(out, `"trace_id"`), "trace_id 字段应恰好出现一次")
+
+	var entry map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(out), &entry))
+	assert.Equal(t, "trace-abc", entry["trace_id"])
+}
+
+// TestExtractTraceFromIncomingPriority 验证 trace 提取优先级：OTel span > metadata > ctx.Value
+// （ExtractTraceFromIncoming 已改为 ValueFromIncomingContext 单 value 拷贝，语义需保持等价）
+func TestExtractTraceFromIncomingPriority(t *testing.T) {
+	// metadata fallback + 大小写不敏感
+	md := metadata.Pairs("TRACE_ID", "md-trace")
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	assert.Equal(t, "md-trace", ExtractTraceFromIncoming(ctx))
+
+	// OTel span 优先于 metadata
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    trace.TraceID{0x01},
+		SpanID:     trace.SpanID{0x02},
+		TraceFlags: trace.FlagsSampled,
+	})
+	otelCtx := trace.ContextWithSpanContext(ctx, sc)
+	assert.Equal(t, sc.TraceID().String(), ExtractTraceFromIncoming(otelCtx))
+
+	// OTel span 优先于 ctx.Value
+	valueCtx := context.WithValue(context.Background(), ContextKeyTraceID, "value-trace")
+	assert.Equal(t, sc.TraceID().String(), ExtractTraceFromIncoming(trace.ContextWithSpanContext(valueCtx, sc)))
+
+	// 空输入返回空
+	assert.Empty(t, ExtractTraceFromIncoming(context.Background()))
+}
+
+// TestInfoContextOTelTraceIDJSON 验证 OTel span 的 trace_id 经直写路径输出且 JSON 合法
+func TestInfoContextOTelTraceIDJSON(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewLogger().
+		WithOutput(&buf).
+		WithFormat(FormatJSON).
+		WithShowCaller(false)
+
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    trace.TraceID{0x0a, 0x0b},
+		SpanID:     trace.SpanID{0x0c},
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	logger.InfoContext(ctx, "otel trace")
+
+	out := strings.TrimSpace(buf.String())
+	assert.Equal(t, 1, strings.Count(out, `"trace_id"`))
+
+	var entry map[string]any
+	assert.NoError(t, json.Unmarshal([]byte(out), &entry))
+	assert.Equal(t, sc.TraceID().String(), entry["trace_id"])
 }
