@@ -269,27 +269,27 @@ func (l *Logger) WithShowStacktrace(show bool) *Logger {
 	return l
 }
 
-// WithTimestampKey 设置时间戳字段名
+// WithTimestampKey 设置时间戳字段名（条目首字段，片段不带前导逗号）
 func (l *Logger) WithTimestampKey(key string) *Logger {
-	l.timestampKey = keyJSONFragment(key)
+	l.timestampKey = keyJSONFragment(key, false)
 	return l
 }
 
 // WithLevelKey 设置日志级别字段名
 func (l *Logger) WithLevelKey(key string) *Logger {
-	l.levelKey = keyJSONFragment(key)
+	l.levelKey = keyJSONFragment(key, true)
 	return l
 }
 
 // WithMessageKey 设置消息字段名
 func (l *Logger) WithMessageKey(key string) *Logger {
-	l.messageKey = keyJSONFragment(key)
+	l.messageKey = keyJSONFragment(key, true)
 	return l
 }
 
 // WithCallerKey 设置调用者字段名
 func (l *Logger) WithCallerKey(key string) *Logger {
-	l.callerKey = keyJSONFragment(key)
+	l.callerKey = keyJSONFragment(key, true)
 	return l
 }
 

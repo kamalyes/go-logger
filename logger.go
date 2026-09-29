@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // ============================================================================
@@ -292,8 +293,7 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 	buf = l.appendTimestamp(buf)
 	buf = append(buf, '"')
 
-	// level
-	buf = append(buf, ',')
+	// level（键片段自带前导逗号，见 keyJSONFragment）
 	buf = append(buf, l.levelKey...)
 	buf = append(buf, '"')
 	buf = append(buf, getLevelName(level)...)
@@ -301,13 +301,11 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 
 	// prefix（如果有）
 	if l.prefix != "" {
-		buf = append(buf, ',')
 		buf = append(buf, prefixKeyJSON...)
 		buf = appendJSONString(buf, strings.TrimSpace(l.prefix))
 	}
 
 	// message
-	buf = append(buf, ',')
 	buf = append(buf, l.messageKey...)
 	buf = appendJSONString(buf, msg)
 
@@ -318,11 +316,10 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 			ci = l.findExternalCaller(3, 6)
 		}
 		if ci != nil {
-			buf = append(buf, ',')
 			buf = append(buf, l.callerKey...)
 			buf = append(buf, '"')
 			buf = append(buf, ci.fileLineJSON...)
-			buf = append(buf, '"', ',')
+			buf = append(buf, '"')
 			buf = append(buf, callerFuncKeyJSON...)
 			buf = append(buf, '"')
 			buf = append(buf, ci.funcNameJSON...)
@@ -407,10 +404,15 @@ func appendJSONKey(buf []byte, key string) []byte {
 	return buf
 }
 
-// keyJSONFragment 预构建键的 JSON 片段（"key": 形式）
-// 与 appendJSONKey 字节输出完全一致（键不做转义），固定键在设置时构建一次，热路径省去 3 次 append 合并为 1 次
-func keyJSONFragment(key string) []byte {
-	b := make([]byte, 0, len(key)+3)
+// keyJSONFragment 预构建键的 JSON 片段（"key": 形式，leadingComma 为 true 时含前导逗号）
+// 与 appendJSONKey 字节输出完全一致（键不做转义），固定键在设置时构建一次，热路径省去 3 次 append 合并为 1 次；
+// 非首字段的键片段携带前导逗号，进一步省去条目骨架构建时逐字段的单字节逗号 append
+// （timestamp 为条目首字段紧随 '{'，不携带逗号）
+func keyJSONFragment(key string, leadingComma bool) []byte {
+	b := make([]byte, 0, len(key)+4)
+	if leadingComma {
+		b = append(b, ',')
+	}
 	b = append(b, '"')
 	b = append(b, key...)
 	b = append(b, '"', ':')
@@ -420,12 +422,12 @@ func keyJSONFragment(key string) []byte {
 // 默认字段名与固定字面键的预构建 JSON 片段，全部 Logger 共享同一份（不可变），
 // 仅 WithXxxKey 变更字段名时才为该 Logger 重建各自片段
 var (
-	defaultTimestampKey = keyJSONFragment("timestamp")
-	defaultLevelKey     = keyJSONFragment("level")
-	defaultMessageKey   = keyJSONFragment("message")
-	defaultCallerKey    = keyJSONFragment("caller")
-	prefixKeyJSON       = keyJSONFragment("prefix")
-	callerFuncKeyJSON   = keyJSONFragment("callerfunc")
+	defaultTimestampKey = keyJSONFragment("timestamp", false)
+	defaultLevelKey     = keyJSONFragment("level", true)
+	defaultMessageKey   = keyJSONFragment("message", true)
+	defaultCallerKey    = keyJSONFragment("caller", true)
+	prefixKeyJSON       = keyJSONFragment("prefix", true)
+	callerFuncKeyJSON   = keyJSONFragment("callerfunc", true)
 )
 
 // jsonNeedsEscape 标记需要 JSON 转义的字节（控制字符、双引号、反斜杠），
@@ -440,16 +442,53 @@ var jsonNeedsEscape = func() (t [256]bool) {
 }()
 
 // appendJSONStringContent 追加 JSON 字符串内容（不带引号，带转义处理）
-// 快速路径：先整串扫描，无转义字节时单次 append 拷贝（memmove），
-// 消除逐字节 switch 分派加逐字节 append 的双重开销；命中转义字节后退回慢路径
+// 快速路径：SWAR 按 8 字节批量检测（三次 64 位运算替代逐字节表查），
+// 全部无需转义时直接推进，整体无转义字节则退化为一次 memmove 拷贝；
+// 检出转义字节（或不足 8 字节的尾部）后退回逐字节循环精确定位，再入慢路径
 func appendJSONStringContent(buf []byte, s string) []byte {
-	for i := 0; i < len(s); i++ {
+	i := 0
+	for len(s)-i >= 8 {
+		if !jsonEscapeFree8(loadWord64(s, i)) {
+			break
+		}
+		i += 8
+	}
+	for ; i < len(s); i++ {
 		if jsonNeedsEscape[s[i]] {
 			buf = append(buf, s[:i]...)
 			return appendJSONStringContentSlow(buf, s[i:])
 		}
 	}
 	return append(buf, s...)
+}
+
+// SWAR（SIMD within a Register）批量检测常量：借位传播技巧把 8 个字节级
+// 判断压缩为一次 64 位运算，swarLSB 每字节最低位 1，swarMSB 每字节最高位 1
+const (
+	swarLSB = 0x0101010101010101
+	swarMSB = 0x8080808080808080
+)
+
+// jsonEscapeFree8 判断 8 字节 word 是否全部无需 JSON 转义（不含 <0x20、'"'、'\\'）
+// <0x20 用 (x-0x20..) 借位检出；'"' 与 '\\' 用 XOR 归零后 hasZero 依次检出
+// （0x22^0x5C=0x7E，第二次 XOR 复用同一变量）；≥0x80 的 UTF-8 续字节被最高位
+// 掩码天然排除，中文等多字节内容不会误报
+func jsonEscapeFree8(x uint64) bool {
+	if (x-0x2020202020202020)&^x&swarMSB != 0 { // 存在 < 0x20 的字节
+		return false
+	}
+	x ^= 0x2222222222222222 // 此后 0x00 字节对应原字节的 '"'
+	if (x-swarLSB)&^x&swarMSB != 0 {
+		return false
+	}
+	x ^= 0x7E7E7E7E7E7E7E7E // 归零点变为原字节的 '\\'
+	return (x-swarLSB)&^x&swarMSB == 0
+}
+
+// loadWord64 加载字符串偏移 i 处的 8 字节为 uint64（x86 允许未对齐加载）
+// 调用方保证 s 非空且 i+8 <= len(s)，unsafe.StringData 仅取底层指针不做拷贝
+func loadWord64(s string, i int) uint64 {
+	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.StringData(s)), i))
 }
 
 // appendJSONStringContentSlow 慢路径：从首个需转义字节起逐字节处理（含转义字节自身）
@@ -567,6 +606,19 @@ func (l *Logger) findExternalCaller(skip, maxFrames int) *callerInfo {
 	// 栈上数组，无需 Pool，无堆分配
 	var pcs [12]uintptr
 	n := runtime.Callers(skip, pcs[:maxFrames])
+
+	// 尾帧快查：仅入口邻接层 (2,3) 成立——[自身, 入口API, 用户] 布局下 pcs[0..1]
+	// 恒为 logger 包内部帧（哨兵），尾帧即首个外部调用点，单次缓存查询替代逐帧过滤；
+	// 尾帧未缓存或命中内部哨兵时回退逐帧解析，语义不变。头部层 (3,6) 布局更深，
+	// 尾帧不保证是首个外部帧，不启用快查
+	if skip == 2 && maxFrames == 3 && n == 3 {
+		if cached, ok := callerCache.Load(pcs[2]); ok {
+			if ci := cached.(*callerInfo); ci.file != "" {
+				return ci
+			}
+		}
+	}
+
 	if ci := resolveExternalCaller(pcs[:n]); ci != nil {
 		return ci
 	}

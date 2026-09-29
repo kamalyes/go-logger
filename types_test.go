@@ -123,10 +123,10 @@ func (s *TypesTestSuite) TestLoggerWithFieldKeys() {
 		WithCallerKey("caller").
 		WithStacktraceKey("stack")
 
-	assert.Equal(s.T(), keyJSONFragment("ts"), logger.timestampKey)
-	assert.Equal(s.T(), keyJSONFragment("lvl"), logger.levelKey)
-	assert.Equal(s.T(), keyJSONFragment("msg"), logger.messageKey)
-	assert.Equal(s.T(), keyJSONFragment("caller"), logger.callerKey)
+	assert.Equal(s.T(), keyJSONFragment("ts", false), logger.timestampKey)
+	assert.Equal(s.T(), keyJSONFragment("lvl", true), logger.levelKey)
+	assert.Equal(s.T(), keyJSONFragment("msg", true), logger.messageKey)
+	assert.Equal(s.T(), keyJSONFragment("caller", true), logger.callerKey)
 	assert.Equal(s.T(), "stack", logger.stacktraceKey)
 }
 
