@@ -55,6 +55,7 @@ jobs:
           - kamalyes/go-casbin
           - kamalyes/go-config
           - kamalyes/go-logger-adapter
+          - kamalyes/go-logger-benchmark
           - kamalyes/go-natsx
           - kamalyes/go-i18n
           - kamalyes/go-pbmo
