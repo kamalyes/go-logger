@@ -47,11 +47,12 @@ type Logger struct {
 	callerDepth    int
 	showStacktrace bool
 
-	// 字段名配置
-	timestampKey  string
-	levelKey      string
-	messageKey    string
-	callerKey     string
+	// 字段名配置：热路径 4 键直接存预构建 "key": JSON 片段（设置时构建一次，单次 append 拷贝），
+	// 默认值共享包级片段（defaultXxxKey，见 logger.go）；stacktrace 为冷路径保留原字符串
+	timestampKey  []byte
+	levelKey      []byte
+	messageKey    []byte
+	callerKey     []byte
 	stacktraceKey string
 
 	// 异步写入配置
@@ -183,10 +184,10 @@ func NewLogger() *Logger {
 		format:         FormatJSON,
 		callerDepth:    2,
 		showStacktrace: false,
-		timestampKey:   "timestamp",
-		levelKey:       "level",
-		messageKey:     "message",
-		callerKey:      "caller",
+		timestampKey:   defaultTimestampKey,
+		levelKey:       defaultLevelKey,
+		messageKey:     defaultMessageKey,
+		callerKey:      defaultCallerKey,
 		stacktraceKey:  "stacktrace",
 		asyncWrite:     false,
 		bufferSize:     0,
@@ -270,25 +271,25 @@ func (l *Logger) WithShowStacktrace(show bool) *Logger {
 
 // WithTimestampKey 设置时间戳字段名
 func (l *Logger) WithTimestampKey(key string) *Logger {
-	l.timestampKey = key
+	l.timestampKey = keyJSONFragment(key)
 	return l
 }
 
 // WithLevelKey 设置日志级别字段名
 func (l *Logger) WithLevelKey(key string) *Logger {
-	l.levelKey = key
+	l.levelKey = keyJSONFragment(key)
 	return l
 }
 
 // WithMessageKey 设置消息字段名
 func (l *Logger) WithMessageKey(key string) *Logger {
-	l.messageKey = key
+	l.messageKey = keyJSONFragment(key)
 	return l
 }
 
 // WithCallerKey 设置调用者字段名
 func (l *Logger) WithCallerKey(key string) *Logger {
-	l.callerKey = key
+	l.callerKey = keyJSONFragment(key)
 	return l
 }
 

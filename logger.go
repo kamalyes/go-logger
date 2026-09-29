@@ -176,7 +176,7 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
-		if ci := l.findExternalCaller(); ci != nil {
+		if ci := l.findExternalCaller(3, 6); ci != nil {
 			buf = append(buf, '[')
 			buf = append(buf, ci.file...)
 			buf = append(buf, ':')
@@ -242,7 +242,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
-		if ci := l.findExternalCaller(); ci != nil {
+		if ci := l.findExternalCaller(3, 6); ci != nil {
 			buf = append(buf, '[')
 			buf = append(buf, ci.file...)
 			buf = append(buf, ':')
@@ -269,7 +269,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = append(buf, '{')
-	buf = l.appendJSONHeader(buf, level, msg)
+	buf = l.appendJSONHeader(buf, level, msg, nil)
 
 	// 额外 fields（traceId、KV 等）
 	for k, v := range fields {
@@ -283,16 +283,18 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 
 // appendJSONHeader 追加 JSON 条目骨架（timestamp/level/prefix/msg/caller，不含开头 '{'）
 // 供 writeJSONEntry 与 KV 直写路径共享，保证字段顺序一致
-func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string) []byte {
+// ci 为调用方在入口邻接层浅层定位的调用者信息（logWithKV/logWithContextKV 传入）；
+// nil 时（writeJSONEntry 路径或浅层未命中）在本层自解析兜底，帧布局更深故捕获帧数更多
+func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *callerInfo) []byte {
 	// timestamp
-	buf = appendJSONKey(buf, l.timestampKey)
+	buf = append(buf, l.timestampKey...)
 	buf = append(buf, '"')
 	buf = l.appendTimestamp(buf)
 	buf = append(buf, '"')
 
 	// level
 	buf = append(buf, ',')
-	buf = appendJSONKey(buf, l.levelKey)
+	buf = append(buf, l.levelKey...)
 	buf = append(buf, '"')
 	buf = append(buf, getLevelName(level)...)
 	buf = append(buf, '"')
@@ -300,25 +302,28 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string) []byte
 	// prefix（如果有）
 	if l.prefix != "" {
 		buf = append(buf, ',')
-		buf = appendJSONKey(buf, "prefix")
+		buf = append(buf, prefixKeyJSON...)
 		buf = appendJSONString(buf, strings.TrimSpace(l.prefix))
 	}
 
 	// message
 	buf = append(buf, ',')
-	buf = appendJSONKey(buf, l.messageKey)
+	buf = append(buf, l.messageKey...)
 	buf = appendJSONString(buf, msg)
 
 	// caller（如果启用）- 用循环回溯找到第一个 go-logger 包外的调用者
 	// 直接拼接缓存中预转义的 file:line 与函数名片段，零转义扫描
 	if l.showCaller.Load() {
-		if ci := l.findExternalCaller(); ci != nil {
+		if ci == nil {
+			ci = l.findExternalCaller(3, 6)
+		}
+		if ci != nil {
 			buf = append(buf, ',')
-			buf = appendJSONKey(buf, l.callerKey)
+			buf = append(buf, l.callerKey...)
 			buf = append(buf, '"')
 			buf = append(buf, ci.fileLineJSON...)
 			buf = append(buf, '"', ',')
-			buf = appendJSONKey(buf, "callerfunc")
+			buf = append(buf, callerFuncKeyJSON...)
 			buf = append(buf, '"')
 			buf = append(buf, ci.funcNameJSON...)
 			buf = append(buf, '"')
@@ -394,12 +399,34 @@ func (l *Logger) extractContextFields(ctx context.Context) map[string]any {
 }
 
 // appendJSONKey 追加 JSON 键（假设 key 是简单 ASCII 字符串，无需转义）
+// 仅用于动态键（KV 参数、fields map）；Logger 固定键为预构建片段，单次 append 拷贝
 func appendJSONKey(buf []byte, key string) []byte {
 	buf = append(buf, '"')
 	buf = append(buf, key...)
 	buf = append(buf, '"', ':')
 	return buf
 }
+
+// keyJSONFragment 预构建键的 JSON 片段（"key": 形式）
+// 与 appendJSONKey 字节输出完全一致（键不做转义），固定键在设置时构建一次，热路径省去 3 次 append 合并为 1 次
+func keyJSONFragment(key string) []byte {
+	b := make([]byte, 0, len(key)+3)
+	b = append(b, '"')
+	b = append(b, key...)
+	b = append(b, '"', ':')
+	return b
+}
+
+// 默认字段名与固定字面键的预构建 JSON 片段，全部 Logger 共享同一份（不可变），
+// 仅 WithXxxKey 变更字段名时才为该 Logger 重建各自片段
+var (
+	defaultTimestampKey = keyJSONFragment("timestamp")
+	defaultLevelKey     = keyJSONFragment("level")
+	defaultMessageKey   = keyJSONFragment("message")
+	defaultCallerKey    = keyJSONFragment("caller")
+	prefixKeyJSON       = keyJSONFragment("prefix")
+	callerFuncKeyJSON   = keyJSONFragment("callerfunc")
+)
 
 // jsonNeedsEscape 标记需要 JSON 转义的字节（控制字符、双引号、反斜杠），
 // 数组直接索引代替 switch 多分支比较，扫描一个字节仅需一次加载加判断
@@ -526,22 +553,25 @@ var callerCache sync.Map
 
 // findExternalCaller 回溯调用栈，返回第一个不在 go-logger/reflect/testing/runtime 内的调用者缓存信息
 // 未找到（罕见，如全部帧均来自内部包）返回 nil
+// skip 为捕获起始深度（0 起，相对 runtime.Callers 自身），maxFrames 为浅层捕获帧数
 // 优化策略：
-//  1. 两级容量：go-logger 内部帧最深不超过数层，外部调用者几乎总在前几帧出现，
-//     先走浅层 6 帧避免 runtime.Callers 回溯完整深栈（testing/框架调用链深达数十帧，
-//     帧数越多 pcvalue 内联展开成本越高）；浅层装满仍未命中时再全量回退
-//  2. 用文件路径判断内部调用者（避免 runtime.FuncForPC().Name() 的字符串分配）
-//  3. 仅对外部调用者调用 .Name()（从 2-3 次分配降至 1 次）
+//  1. 分层定位：调用方按自身帧布局传参——入口邻接层（logWithKV/logWithContextKV）以 (2,3)
+//     精确覆盖 [自身, 入口API, 用户] 布局；头部层（appendJSONHeader/appendTextHeader/ultraLog）以
+//     (3,6) 兜底更深的 [头部, 汇聚函数, 入口API, 用户] 布局。Go 1.25 的 tracebackPCs 对
+//     每个物理帧都解析内联树（pcvalue），热路径只回溯最少帧数
+//  2. 浅层装满仍未命中（内部链比预期深，如格式化/对象分支的冷路径）时全量回退兜底
+//  3. 用文件路径判断内部调用者（避免 runtime.FuncForPC().Name() 的字符串分配），
+//     仅对外部调用者调用 .Name()，内部帧以哨兵缓存后稳态零成本跳过
 //  4. 按 PC 缓存结果与预转义 JSON 片段（热路径零分配、零转义扫描）
-func (l *Logger) findExternalCaller() *callerInfo {
+func (l *Logger) findExternalCaller(skip, maxFrames int) *callerInfo {
 	// 栈上数组，无需 Pool，无堆分配
 	var pcs [12]uintptr
-	n := runtime.Callers(3, pcs[:6])
+	n := runtime.Callers(skip, pcs[:maxFrames])
 	if ci := resolveExternalCaller(pcs[:n]); ci != nil {
 		return ci
 	}
-	if n == 6 { // 浅层装满：调用链比预期深，全量回退兜底
-		n = runtime.Callers(3, pcs[:])
+	if n == maxFrames { // 浅层装满：调用链比预期深，全量回退兜底
+		n = runtime.Callers(skip, pcs[:])
 		if ci := resolveExternalCaller(pcs[:n]); ci != nil {
 			return ci
 		}
@@ -948,8 +978,15 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		buf := (*p)[:0]
 		defer func() { putPooledBuf(&bytePool, p, buf) }()
 
+		// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
+		// 较头部层 (3,6) 自解析少回溯约一半物理帧；未命中时头部层兜底
+		var ci *callerInfo
+		if l.showCaller.Load() {
+			ci = l.findExternalCaller(2, 3)
+		}
+
 		buf = append(buf, '{')
-		buf = l.appendJSONHeader(buf, level, msg)
+		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = appendKVPairsJSON(buf, keysAndValues)
 		l.writeJSONTail(level, buf)
 		return
@@ -987,7 +1024,8 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 
 // appendKVPairsJSON 将键值对参数直写为 JSON 顶层字段（零 map 分配）
 // 奇数个参数时落单的 key 输出 "<missing>" 值，与 text 模式语义一致
-// key 的 string 断言内联在循环内：省去每对 KV 的函数调用（fmt.Sprint 罕见分支会阻碍内联）
+// key 与 value 的 string/int 断言均内联在循环内：覆盖最常见类型，
+// 省去每对 KV 的函数调用（appendJSONValue 的大 switch 与 fmt.Sprint 罕见分支会阻碍内联）
 func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 	for i := 0; i < len(keysAndValues); i += 2 {
 		buf = append(buf, ',')
@@ -997,7 +1035,14 @@ func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 			buf = appendJSONKey(buf, fmt.Sprint(keysAndValues[i]))
 		}
 		if i+1 < len(keysAndValues) {
-			buf = appendJSONValue(buf, keysAndValues[i+1])
+			switch v := keysAndValues[i+1].(type) {
+			case string:
+				buf = appendJSONString(buf, v)
+			case int:
+				buf = strconv.AppendInt(buf, int64(v), 10)
+			default:
+				buf = appendJSONValue(buf, v)
+			}
 		} else {
 			buf = appendJSONValue(buf, "<missing>")
 		}
@@ -1059,8 +1104,15 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 		buf := (*p)[:0]
 		defer func() { putPooledBuf(&bytePool, p, buf) }()
 
+		// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
+		// 较头部层 (3,6) 自解析少回溯约一半物理帧；未命中时头部层兜底
+		var ci *callerInfo
+		if l.showCaller.Load() {
+			ci = l.findExternalCaller(2, 3)
+		}
+
 		buf = append(buf, '{')
-		buf = l.appendJSONHeader(buf, level, msg)
+		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = l.appendContextFieldsJSON(buf, ctx, keysAndValues)
 		buf = appendKVPairsJSON(buf, keysAndValues)
 		l.writeJSONTail(level, buf)

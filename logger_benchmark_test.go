@@ -23,10 +23,10 @@ func benchLogger(format FormatType, showCaller bool) *Logger {
 		format:       format,
 		timeFormat:   "2006/01/02 15:04:05",
 		output:       io.Discard,
-		timestampKey: "timestamp",
-		levelKey:     "level",
-		messageKey:   "message",
-		callerKey:    "caller",
+		timestampKey: defaultTimestampKey,
+		levelKey:     defaultLevelKey,
+		messageKey:   defaultMessageKey,
+		callerKey:    defaultCallerKey,
 		contextKeys:  append([]compiledContextKey(nil), defaultCompiledContextKeys...),
 	}
 	l.level.Store(int32(DEBUG))
@@ -132,7 +132,7 @@ func BenchmarkFindExternalCaller(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		l.findExternalCaller()
+		l.findExternalCaller(2, 3)
 	}
 }
 
