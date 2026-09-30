@@ -327,7 +327,7 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 	// 直接拼接缓存中预转义的 file:line 与函数名片段，零转义扫描
 	if l.showCaller.Load() {
 		if ci == nil {
-			ci = l.findExternalCaller(3, 6)
+			ci = l.findExternalCaller(3, 5)
 		}
 		if ci != nil {
 			buf = append(buf, l.callerKey...)
