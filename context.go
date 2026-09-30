@@ -27,6 +27,12 @@ const ContextKeyTraceID = "trace_id"
 type compiledContextKey struct {
 	key      string
 	keyBytes []byte
+	// keyAny 预装箱的 any 形态（ctx.Value 取参）
+	//
+	// ctx.Value(any) 对非常量 string 实参必须装箱，且因 Value 是接口方法该装箱逃逸到堆——
+	// 即每条带 context 的日志、每个 context key 各一次分配。这里在编译期一次性装箱复用，
+	// 把该路径的分配降为零（interface 相等性对相等 string 不变，ctx.Value 语义完全一致）
+	keyAny any
 }
 
 var defaultContextKeys = []string{
@@ -64,6 +70,7 @@ func compileContextKeys(keys []string) []compiledContextKey {
 		compiled = append(compiled, compiledContextKey{
 			key:      key,
 			keyBytes: []byte(key),
+			keyAny:   key, // 预装箱，避免每次 ctx.Value 调用各一次堆分配
 		})
 	}
 
@@ -88,7 +95,7 @@ func extractKeyValue(ctx context.Context, key compiledContextKey, otelTraceID st
 	if key.key == ContextKeyTraceID && otelTraceID != "" {
 		return otelTraceID
 	}
-	if raw := ctx.Value(key.key); raw != nil {
+	if raw := ctx.Value(key.keyAny); raw != nil {
 		if text, ok := raw.(string); ok && text != "" {
 			return text
 		}
@@ -197,7 +204,7 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 			if !kvContainsKey(kv, "context") {
 				buf = append(buf, ',')
 				buf = appendJSONKey(buf, "context")
-				buf = appendJSONValue(buf, info)
+				buf = appendJSONString(buf, info)
 			}
 		}
 		return buf
@@ -211,7 +218,7 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 		if !kvContainsKey(kv, ContextKeyTraceID) {
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, ContextKeyTraceID)
-			buf = appendJSONValue(buf, otelTraceID)
+			buf = appendJSONString(buf, otelTraceID)
 		}
 		// 无论是否写出（KV 提供同名时跳过），trace_id 均视为已处理，避免 keys 循环重复写
 		traceIDHandled = true
@@ -230,7 +237,7 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 		buf = append(buf, '"')
 		buf = append(buf, key.keyBytes...)
 		buf = append(buf, '"', ':')
-		buf = appendJSONValue(buf, value)
+		buf = appendJSONString(buf, value)
 	}
 
 	return buf
