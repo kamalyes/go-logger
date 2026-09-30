@@ -691,7 +691,7 @@ func resolvePCInlineAware(pc uintptr) *callerInfo {
 		if fr.File == "" && fr.Function == "" {
 			break
 		}
-		if !isInternalCallerByFile(fr.File) {
+		if !isInternalCaller(fr.File, fr.Function) {
 			return newCallerInfo(fr.File, fr.Line, fr.Function)
 		}
 		if !more {
@@ -726,19 +726,54 @@ func newCallerInfo(file string, line int, name string) *callerInfo {
 // internalCallerSentinel 内部帧缓存哨兵（file 为空，命中即跳过该帧）
 var internalCallerSentinel = &callerInfo{}
 
-// isInternalCallerByFile 根据文件路径判断是否为需要跳过的内部调用
-// 仅使用文件路径（无需函数名），避免 runtime.FuncForPC().Name() 的字符串分配
+// selfPkgPrefix 本包的 runtime 包路径前缀（含末尾 '.'），如
+// "github.com/kamalyes/go-logger."
+//
+// 在 init 期由本包一个函数的 runtime 名称推导，编译期确定、与磁盘路径无关，
+// 因此改名检出目录、git worktree、vendor 副本、fork 改模块名都不影响判定
+var selfPkgPrefix = computeSelfPkgPrefix()
+
+// computeSelfPkgPrefix 取本函数的 runtime 名称并截出包路径前缀
+//
+// 包级函数的 runtime 名称形如 "<包路径>.<函数名>"，而包路径自身含点
+// （github.com/...），故按最后一个 '.' 切分恰好得到包路径 + '.'
+// 仅 init 期执行一次，热路径零成本。
+func computeSelfPkgPrefix() string {
+	var pcs [1]uintptr
+	if runtime.Callers(1, pcs[:]) < 1 {
+		return ""
+	}
+	fr, _ := runtime.CallersFrames(pcs[:]).Next()
+	if i := strings.LastIndex(fr.Function, "."); i >= 0 {
+		return fr.Function[:i+1]
+	}
+	return ""
+}
+
+// isInternalCaller 判断栈帧是否为需要跳过的内部调用
 // 跳过 go-logger 自身、reflect 反射、testing 框架、runtime 内部
-// 注意：_test.go 文件即使属于 go-logger 包也不跳过（测试代码本身就是调用者）
-func isInternalCallerByFile(file string) bool {
+//
+// 本包帧按**函数名包路径**判定，不可改回按文件路径子串匹配：
+// 原实现用 strings.Contains(file, "/go-logger/")，只要检出目录不叫 go-logger
+// 该判定即失效（git worktree、vendor 副本、改名的 clone、workspace 名不同的 CI、
+// 改名的 fork 都会触发），届时库自身的帧被当作外部调用者，每条日志的 caller
+// 静默指向库内部（如 logger.go:287 / writeJSONEntry）而非用户代码——日志定位全面失准且无任何报错
+//
+// 函数名在 resolvePCInlineAware 中已由 CallersFrames 免费提供（fr.Function），
+// 故不再有原注释所顾虑的 runtime.FuncForPC().Name() 字符串分配。
+//
+// 注意：_test.go 文件即使属于本包也不跳过（测试代码本身就是调用者）
+// 该豁免必须保留且必须先于包路径判定——本包内测试函数的 runtime 名称
+// 同样带 selfPkgPrefix（外部测试包 pkg_test 因前缀含末尾 '.' 而天然不匹配）
+func isInternalCaller(file, function string) bool {
 	if strings.HasSuffix(file, "_test.go") {
 		return false
 	}
-	// 检查 go-logger 包（跨平台：同时检查正斜杠和反斜杠）
-	if strings.Contains(file, `/go-logger/`) || strings.Contains(file, `\go-logger\`) {
+	// 本包帧：按包路径前缀判定，与磁盘路径无关
+	if selfPkgPrefix != "" && strings.HasPrefix(function, selfPkgPrefix) {
 		return true
 	}
-	// 检查 Go 标准库 runtime/reflect/testing
+	// Go 标准库 runtime/reflect/testing：GOROOT 下 src/<pkg>/ 布局稳定，仍按路径判定（跨平台：同时检查正斜杠与反斜杠）
 	if strings.Contains(file, `/src/runtime/`) || strings.Contains(file, `\src\runtime\`) {
 		return true
 	}
