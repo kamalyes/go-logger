@@ -658,43 +658,69 @@ func resolveExternalCaller(pcs []uintptr) *callerInfo {
 			return ci
 		}
 
-		// 未缓存：获取 *Func（无分配），用 FileLine 拿文件路径（无字符串分配）
-		fn := runtime.FuncForPC(pc)
-		if fn == nil {
-			continue
-		}
-		f, ln := fn.FileLine(pc)
-
-		// 用文件路径判断是否内部调用（无字符串分配）
-		if isInternalCallerByFile(f) {
+		// 未缓存：用 CallersFrames 做**内联感知**解析
+		//
+		// 不可用 runtime.FuncForPC(pc)+fn.FileLine(pc)：该组合不展开内联帧，
+		// 对"含内联调用的物理帧"会报出物理帧 PC 的归属行——落在真实调用行的**后一行**，
+		// 且函数名取到外层物理函数而非内联的入口 API
+		// 公开入口（Info/InfoMsg/InfoKV/ErrorContextKV 等）成本仅 72-74 全部被内联，
+		// 故这正是常态路径：曾导致每条日志的 caller 行号整体偏移 +1
+		// CallersFrames 自带内联树展开与 pc 归属调整，与 runtime 自身的栈打印一致
+		//
+		// 分配只发生在**缓存未命中**（每个唯一 PC 一次），稳态仍是 callerCache.Load 零分配命中
+		ci := resolvePCInlineAware(pc)
+		if ci == nil {
 			callerCache.Store(pc, internalCallerSentinel) // 缓存内部帧哨兵
 			continue
-		}
-
-		// 找到外部调用者：此处是唯一需要分配的地方（首次调用，后续命中缓存）
-		name := fn.Name()
-		// 统一路径分隔符为正斜杠，保留完整路径以便 IDE 点击跳转
-		if strings.ContainsRune(f, '\\') {
-			f = strings.ReplaceAll(f, `\`, `/`)
-		}
-
-		// 预构建 JSON 转义片段（file:line 已含行号，写出时直接拼接）
-		fileLineJSON := appendJSONStringContent(nil, f)
-		fileLineJSON = append(fileLineJSON, ':')
-		fileLineJSON = strconv.AppendInt(fileLineJSON, int64(ln), 10)
-		funcNameJSON := appendJSONStringContent(nil, name)
-
-		ci := &callerInfo{
-			file:         f,
-			line:         ln,
-			funcName:     name,
-			fileLineJSON: fileLineJSON,
-			funcNameJSON: funcNameJSON,
 		}
 		callerCache.Store(pc, ci)
 		return ci
 	}
 	return nil
+}
+
+// resolvePCInlineAware 解析单个 PC 的首个外部逻辑帧（内联感知）
+//
+// 一个物理 PC 经内联可展开为多个逻辑帧（内层为被内联的函数）。逐帧取首个
+// 非内部帧，全部为内部帧时返回 nil（调用方据此缓存哨兵）。
+// 仅在缓存未命中时调用，故 CallersFrames 的分配按唯一 PC 摊销。
+func resolvePCInlineAware(pc uintptr) *callerInfo {
+	frames := runtime.CallersFrames([]uintptr{pc})
+	for {
+		fr, more := frames.Next()
+		if fr.File == "" && fr.Function == "" {
+			break
+		}
+		if !isInternalCallerByFile(fr.File) {
+			return newCallerInfo(fr.File, fr.Line, fr.Function)
+		}
+		if !more {
+			break
+		}
+	}
+	return nil
+}
+
+// newCallerInfo 构建调用者缓存条目（含预转义 JSON 片段）
+func newCallerInfo(file string, line int, name string) *callerInfo {
+	// 统一路径分隔符为正斜杠，保留完整路径以便 IDE 点击跳转
+	if strings.ContainsRune(file, '\\') {
+		file = strings.ReplaceAll(file, `\`, `/`)
+	}
+
+	// 预构建 JSON 转义片段（file:line 已含行号，写出时直接拼接）
+	fileLineJSON := appendJSONStringContent(nil, file)
+	fileLineJSON = append(fileLineJSON, ':')
+	fileLineJSON = strconv.AppendInt(fileLineJSON, int64(line), 10)
+	funcNameJSON := appendJSONStringContent(nil, name)
+
+	return &callerInfo{
+		file:         file,
+		line:         line,
+		funcName:     name,
+		fileLineJSON: fileLineJSON,
+		funcNameJSON: funcNameJSON,
+	}
 }
 
 // internalCallerSentinel 内部帧缓存哨兵（file 为空，命中即跳过该帧）
