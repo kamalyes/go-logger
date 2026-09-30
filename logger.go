@@ -167,6 +167,10 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 	// 添加时间戳
 	buf = l.appendTimestamp(buf)
 
+	// 时间戳与后续字段的分隔符：级别前缀只带尾随空格不带前导空格，
+	// 缺此分隔符时无前缀的条目会粘成 "...+08:00ℹ️ [INFO] msg"
+	buf = append(buf, ' ')
+
 	// 添加前缀（如果有）
 	if l.prefix != "" {
 		buf = append(buf, l.prefix...)
@@ -247,6 +251,9 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	// 添加时间戳
 	buf = l.appendTimestamp(buf)
 
+	// 时间戳分隔符（与 appendTextHeader 保持一致）
+	buf = append(buf, ' ')
+
 	// 添加前缀（如果有）
 	if l.prefix != "" {
 		buf = append(buf, l.prefix...)
@@ -269,7 +276,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	}
 
 	// 添加消息
-	buf = append(buf, msg...)
+	buf = appendTextSafe(buf, msg)
 	l.writeTextBuf(level, buf)
 }
 
@@ -374,7 +381,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = append(buf, msg...)
+	buf = appendTextSafe(buf, msg)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -382,9 +389,9 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
-		buf = append(buf, k...)
+		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = appendValue(buf, v)
+		buf = appendValueSafe(buf, v)
 		first = false
 	}
 
@@ -580,10 +587,47 @@ func appendJSONValue(buf []byte, v any) []byte {
 		return strconv.AppendFloat(buf, val, 'f', -1, 64)
 	case nil:
 		return append(buf, 'n', 'u', 'l', 'l')
+
+	// 以下分支此前缺失，全部落到 fmt.Sprintf 兜底并各产生一次堆分配；
+	// 其中 error 是结构化日志里最常见的非原始类型（实测 +48B/1 alloc），
+	// []byte 更会被 %v 输出成 "[104 101 108]" 这种无用形态
+	case []byte:
+		buf = append(buf, '"')
+		buf = appendJSONStringContentBytes(buf, val)
+		return append(buf, '"')
+	case time.Duration:
+		// 具名 int64，不匹配 case int64；与 text 模式的 fmt.Sprint 保持 "1.5ms" 形态
+		return appendJSONString(buf, val.String())
+	case time.Time:
+		// 复用时间戳快速路径，与条目的 timestamp 字段同格式
+		buf = append(buf, '"')
+		buf = appendRFC3339Nano(buf, val)
+		return append(buf, '"')
+	case error:
+		// error 先于 Stringer 判定：对 error 而言 Error() 才是正确取值
+		if val == nil {
+			return append(buf, 'n', 'u', 'l', 'l')
+		}
+		return appendJSONString(buf, val.Error())
+	case fmt.Stringer:
+		return appendJSONString(buf, val.String())
+
 	default:
 		// 其他类型降级用 fmt.Sprintf 转字符串后输出
 		return appendJSONString(buf, fmt.Sprintf("%v", v))
 	}
+}
+
+// appendJSONStringContentBytes 等价于 appendJSONStringContent 的 []byte 入参形态
+// （避免 string(b) 的拷贝分配）
+func appendJSONStringContentBytes(buf []byte, b []byte) []byte {
+	for i := 0; i < len(b); i++ {
+		if jsonNeedsEscape[b[i]] {
+			buf = append(buf, b[:i]...)
+			return appendJSONStringContentSlow(buf, string(b[i:]))
+		}
+	}
+	return append(buf, b...)
 }
 
 // hexChars 用于 JSON unicode 转义
@@ -1139,7 +1183,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = append(buf, msg...)
+	buf = appendTextSafe(buf, msg)
 	buf = append(buf, kvBraceOpen...)
 
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -1148,12 +1192,12 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		}
 
 		// 键
-		buf = appendValue(buf, keysAndValues[i])
+		buf = appendValueSafe(buf, keysAndValues[i])
 		buf = append(buf, kvSeparator...)
 
 		// 值
 		if i+1 < len(keysAndValues) {
-			buf = appendValue(buf, keysAndValues[i+1])
+			buf = appendValueSafe(buf, keysAndValues[i+1])
 		} else {
 			buf = append(buf, kvMissing...)
 		}
@@ -1214,7 +1258,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = append(buf, msg...)
+	buf = appendTextSafe(buf, msg)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -1222,9 +1266,9 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
-		buf = append(buf, k...)
+		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = appendValue(buf, v)
+		buf = appendValueSafe(buf, v)
 		first = false
 	}
 

@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2026-09-10 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-09-10 00:00:00
+ * @LastEditTime: 2026-09-30 18:02:53
  * @FilePath: \go-logger\value.go
  * @Description: 值格式化与显示宽度工具（自包含实现，零外部依赖）
  *
@@ -74,10 +74,12 @@ func appendValue(buf []byte, v any) []byte {
 		return append(buf, fmt.Sprint(val)...)
 	case complex128:
 		return append(buf, fmt.Sprint(val)...)
+	case error:
+		// error 先于 Stringer 判定：对同时实现两者的类型，Error() 才是正确取值
+		// （与 appendJSONValue 的分支顺序保持一致，避免两种格式输出不同内容）
+		return append(buf, val.Error()...)
 	case fmt.Stringer:
 		return append(buf, val.String()...)
-	case error:
-		return append(buf, val.Error()...)
 	default:
 		return append(buf, fmt.Sprint(v)...)
 	}
