@@ -14,7 +14,6 @@ import (
 	"context"
 	"io"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,9 +37,13 @@ const (
 // Logger 主要的日志记录器结构体
 type Logger struct {
 	// 基本配置（level 和 showCaller 使用原子操作，允许运行时并发修改）
-	level          atomic.Int32
-	showCaller     atomic.Bool
-	colorful       bool
+	level      atomic.Int32
+	showCaller atomic.Bool
+	colorful   bool
+	// colorExplicit 标记 colorful 由调用方显式指定（WithColorful）
+	// 未显式指定时，colorful 随输出目标的着色能力自动判定（见 shouldColorize）：
+	// WithOutput 切换目标时重新判定，显式指定后则始终尊重调用方的选择
+	colorExplicit  bool
 	prefix         string
 	timeFormat     string
 	format         FormatType
@@ -170,9 +173,16 @@ func isConcurrentSafeOutput(w io.Writer) bool {
 }
 
 // NewLogger 创建新的日志记录器（默认配置）
+//
+// 默认输出为共享的 stdout 异步批量输出器（见 stdout.go 的成本实测与权衡），
+// 而非裸 os.Stdout：后者每条日志一次 syscall + 一次互斥，占全链路 85~97% 的成本
+// 异步语义要求优雅退出时调用 Flush()；需要逐条立即落盘时用 WithOutput(os.Stdout) 退回裸流
+//
+// 着色默认随输出目标自动判定（终端开、重定向关），不再无条件开启
 func NewLogger() *Logger {
+	out := DefaultOutput()
 	l := &Logger{
-		colorful:       true,
+		colorful:       shouldColorize(out),
 		prefix:         "",
 		timeFormat:     time.RFC3339Nano,
 		format:         FormatJSON,
@@ -183,9 +193,9 @@ func NewLogger() *Logger {
 		messageKey:     defaultMessageKey,
 		callerKey:      defaultCallerKey,
 		stacktraceKey:  "stacktrace",
-		output:         os.Stdout,
-		outLockFree:    false, // os.Stdout 并发安全未受保证，保守加锁
-		logger:         log.New(os.Stdout, "", log.LstdFlags),
+		output:         out,
+		outLockFree:    isConcurrentSafeOutput(out),
+		logger:         log.New(out, "", log.LstdFlags),
 		contextKeys:    append([]compiledContextKey(nil), defaultCompiledContextKeys...),
 		stats:          NewLoggerStats(),
 		mu:             sync.Mutex{},
@@ -222,16 +232,27 @@ func (l *Logger) WithPrefix(prefix string) *Logger {
 }
 
 // WithColorful 设置是否使用彩色输出
+// 显式调用后不再随输出目标自动判定，始终尊重此处的选择
 func (l *Logger) WithColorful(colorful bool) *Logger {
 	l.colorful = colorful
+	l.colorExplicit = true
 	return l
 }
 
 // WithOutput 设置输出目标
+//
+// output 原样使用，不做缓冲/异步包装：需要高吞吐时传入内置输出器
+// （NewConsoleWriter / NewFileWriter / NewRotateWriter / DefaultOutput），
+// 传入裸 os.Stdout 或 *os.File 即明确选择"逐条立即落盘"的同步语义
+//
+// 未显式调用过 WithColorful 时，着色随新目标的能力重新判定
 func (l *Logger) WithOutput(output io.Writer) *Logger {
 	l.output = output
 	l.outLockFree = isConcurrentSafeOutput(output)
 	l.logger = log.New(output, l.prefix, log.LstdFlags)
+	if !l.colorExplicit {
+		l.colorful = shouldColorize(output)
+	}
 	return l
 }
 
@@ -336,6 +357,7 @@ func (l *Logger) Clone() ILogger {
 
 	// 手动复制字段（跳过 mutex、sync.Once、stats 与原子状态）
 	newLogger.colorful = l.colorful
+	newLogger.colorExplicit = l.colorExplicit
 	newLogger.prefix = l.prefix
 	newLogger.timeFormat = l.timeFormat
 	newLogger.format = l.format

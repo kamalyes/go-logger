@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-08 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-03-02 00:00:00
+ * @LastEditTime: 2026-10-01 09:26:08
  * @FilePath: \go-logger\types_test.go
  * @Description: 核心类型测试套件
  *
@@ -262,7 +262,10 @@ func (s *TypesTestSuite) TestLoggerDefaultValues() {
 
 	assert.Equal(s.T(), DEBUG, LogLevel(logger.level.Load()))
 	assert.True(s.T(), logger.showCaller.Load())
-	assert.True(s.T(), logger.colorful)
+	// 着色不再无条件开启，而是随输出目标的能力自动判定：
+	// 终端下为 true，重定向/管道（含 go test 捕获的 stdout）下为 false
+	assert.Equal(s.T(), shouldColorize(logger.output), logger.colorful)
+	assert.False(s.T(), logger.colorExplicit)
 	assert.Equal(s.T(), "", logger.prefix)
 	assert.Equal(s.T(), time.RFC3339Nano, logger.timeFormat)
 	assert.Equal(s.T(), FormatJSON, logger.format)
