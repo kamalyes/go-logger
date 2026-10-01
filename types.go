@@ -49,6 +49,10 @@ type Logger struct {
 	format         FormatType
 	callerDepth    int
 	showStacktrace bool
+	// maxLineBytes 单条日志字节上限（默认 DefaultMaxLineBytes），<=0 不限制
+	// maxFieldBytes 单字段值字节上限（默认不限制），<=0 不限制
+	maxLineBytes  int
+	maxFieldBytes int
 	// sanitize 脱敏强度，默认 SanitizeKeys（按字段名擦除凭据与掩码 PII）
 	// 按字段名判定是零分配的，故默认开启不带来可观测的成本；
 	// 值内容扫描要逐条扫文本且可能误伤业务正文，需显式升到 SanitizeKeysAndValues
@@ -193,6 +197,7 @@ func NewLogger() *Logger {
 		callerDepth:    2,
 		showStacktrace: false,
 		sanitize:       SanitizeKeys,
+		maxLineBytes:   DefaultMaxLineBytes,
 		timestampKey:   defaultTimestampKey,
 		levelKey:       defaultLevelKey,
 		messageKey:     defaultMessageKey,
@@ -369,6 +374,8 @@ func (l *Logger) Clone() ILogger {
 	newLogger.callerDepth = l.callerDepth
 	newLogger.showStacktrace = l.showStacktrace
 	newLogger.sanitize = l.sanitize
+	newLogger.maxLineBytes = l.maxLineBytes
+	newLogger.maxFieldBytes = l.maxFieldBytes
 	newLogger.timestampKey = l.timestampKey
 	newLogger.levelKey = l.levelKey
 	newLogger.messageKey = l.messageKey

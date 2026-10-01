@@ -514,10 +514,36 @@ func (l *Logger) appendSanitizedJSONValue(buf []byte, key string, v any) []byte 
 
 	if l.sanitize == SanitizeKeysAndValues {
 		if s, ok := textOf(v); ok {
-			return appendScannedJSONString(buf, s)
+			return appendScannedJSONString(buf, l.capped(s))
+		}
+	}
+	if l.maxFieldBytes > 0 {
+		if s, ok := textOf(v); ok {
+			cut, trimmed := l.capFieldText(s)
+			return appendCappedJSONString(buf, cut, trimmed)
 		}
 	}
 	return appendJSONValue(buf, v)
+}
+
+// appendCappedJSONString 追加（可能已截断的）文本为 JSON 字符串
+// 截断标记在此处直接拼进缓冲，避免为"截断值 + 标记"再分配一次字符串
+func appendCappedJSONString(buf []byte, s string, trimmed bool) []byte {
+	buf = append(buf, '"')
+	buf = appendJSONStringContent(buf, s)
+	if trimmed {
+		buf = appendJSONStringContent(buf, truncatedValueMark)
+	}
+	return append(buf, '"')
+}
+
+// capped 按单字段上限截断文本，超限时追加 truncated 标记
+func (l *Logger) capped(s string) string {
+	cut, trimmed := l.capFieldText(s)
+	if !trimmed {
+		return s
+	}
+	return cut + truncatedValueMark
 }
 
 // appendSanitizedTextValue 按字段名脱敏后追加文本值（text 模式）
@@ -541,7 +567,17 @@ func (l *Logger) appendSanitizedTextValue(buf []byte, key string, v any) []byte 
 
 	if l.sanitize == SanitizeKeysAndValues {
 		if s, ok := textOf(v); ok {
-			return appendScannedText(buf, s)
+			return appendScannedText(buf, l.capped(s))
+		}
+	}
+	if l.maxFieldBytes > 0 {
+		if s, ok := textOf(v); ok {
+			cut, trimmed := l.capFieldText(s)
+			buf = appendTextSafe(buf, cut)
+			if trimmed {
+				buf = append(buf, truncatedValueMark...)
+			}
+			return buf
 		}
 	}
 	return appendValueSafe(buf, v)
@@ -550,6 +586,10 @@ func (l *Logger) appendSanitizedTextValue(buf []byte, key string, v any) []byte 
 // appendSanitizedMessage 在值扫描模式下脱敏 msg 自身
 // msg 常由 fmt 拼接而成，凭据与 PII 最容易从这里漏出去
 func (l *Logger) appendSanitizedMessage(buf []byte, msg string, asJSON bool) []byte {
+	// msg 位于条目骨架内，字段循环的回滚机制管不到它，故在此单独约束：
+	// 一个超长 msg（如把整个响应体拼进消息）单独就能撑爆条目
+	msg = l.cappedMessage(msg)
+
 	if l.sanitize != SanitizeKeysAndValues {
 		if asJSON {
 			return appendJSONString(buf, msg)
@@ -599,4 +639,19 @@ func textKey(k any) string {
 		return s
 	}
 	return ""
+}
+
+// cappedMessage 按整行与单字段上限约束 msg
+// 预留骨架（时间戳、级别、caller、键名）与字段的空间，故只给 msg 分配上限的一半
+func (l *Logger) cappedMessage(msg string) string {
+	limit := l.maxFieldBytes
+	if l.maxLineBytes > 0 {
+		if half := l.maxLineBytes / 2; limit <= 0 || half < limit {
+			limit = half
+		}
+	}
+	if limit <= 0 || len(msg) <= limit {
+		return msg
+	}
+	return msg[:utf8SafeEnd(msg, limit)] + truncatedValueMark
 }

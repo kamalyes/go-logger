@@ -312,30 +312,51 @@ func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, 
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
+	budget := l.lineBudget(false)
+	trimmed := false
 	first := true
 	for i := range fields {
+		mark := len(buf)
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
 		buf = appendTextSafe(buf, fields[i].key)
 		buf = append(buf, kvSeparator...)
-		buf = l.appendSanitizedTextValue(buf, fields[i].key, fields[i].value)
+		fv, cut := l.clampValue(fields[i].value, valueRoom(buf, budget))
+		trimmed = trimmed || cut
+		buf = l.appendSanitizedTextValue(buf, fields[i].key, fv)
+		if overBudget(buf, budget) {
+			buf = rollbackTruncated(buf, mark, false)
+			l.writeTextBuf(level, buf)
+			return
+		}
 		first = false
 	}
 	for i := 0; i < len(kv); i += 2 {
+		mark := len(buf)
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
 		buf = appendValueSafe(buf, kv[i])
 		buf = append(buf, kvSeparator...)
 		if i+1 < len(kv) {
-			buf = l.appendSanitizedTextValue(buf, textKey(kv[i]), kv[i+1])
+			kvv, cut := l.clampValue(kv[i+1], valueRoom(buf, budget))
+			trimmed = trimmed || cut
+			buf = l.appendSanitizedTextValue(buf, textKey(kv[i]), kvv)
 		} else {
 			buf = append(buf, kvMissing...)
+		}
+		if overBudget(buf, budget) {
+			buf = rollbackTruncated(buf, mark, false)
+			l.writeTextBuf(level, buf)
+			return
 		}
 		first = false
 	}
 
 	buf = append(buf, kvBraceClose...)
+	if trimmed {
+		buf = markTruncated(buf, false)
+	}
 	l.writeTextBuf(level, buf)
 }

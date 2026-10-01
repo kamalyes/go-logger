@@ -294,10 +294,23 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	buf = l.appendJSONHeader(buf, level, msg, nil)
 
 	// 额外 fields（traceId、KV 等）
+	budget := l.lineBudget(true)
+	trimmed := false
 	for k, v := range fields {
+		mark := len(buf)
 		buf = append(buf, ',')
 		buf = appendJSONKey(buf, k)
-		buf = l.appendSanitizedJSONValue(buf, k, v)
+		val, cut := l.clampValue(v, valueRoom(buf, budget))
+		trimmed = trimmed || cut
+		buf = l.appendSanitizedJSONValue(buf, k, val)
+		if overBudget(buf, budget) {
+			buf = rollbackTruncated(buf, mark, true)
+			trimmed = false
+			break
+		}
+	}
+	if trimmed {
+		buf = markTruncated(buf, true)
 	}
 
 	l.writeJSONTail(level, buf)
@@ -384,18 +397,30 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
+	budget := l.lineBudget(false)
+	trimmed := false
 	first := true
 	for k, v := range fields {
+		mark := len(buf)
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
 		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = l.appendSanitizedTextValue(buf, k, v)
+		val, cut := l.clampValue(v, valueRoom(buf, budget))
+		trimmed = trimmed || cut
+		buf = l.appendSanitizedTextValue(buf, k, val)
+		if overBudget(buf, budget) {
+			l.writeTextBuf(level, rollbackTruncated(buf, mark, false))
+			return
+		}
 		first = false
 	}
 
 	buf = append(buf, kvBraceClose...)
+	if trimmed {
+		buf = markTruncated(buf, false)
+	}
 	l.writeTextBuf(level, buf)
 }
 
@@ -1184,7 +1209,10 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
+	budget := l.lineBudget(false)
+	trimmed := false
 	for i := 0; i < len(keysAndValues); i += 2 {
+		mark := len(buf)
 		if i > 0 {
 			buf = append(buf, kvDelimiter...)
 		}
@@ -1195,13 +1223,23 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 
 		// 值
 		if i+1 < len(keysAndValues) {
-			buf = l.appendSanitizedTextValue(buf, textKey(keysAndValues[i]), keysAndValues[i+1])
+			val, cut := l.clampValue(keysAndValues[i+1], valueRoom(buf, budget))
+			trimmed = trimmed || cut
+			buf = l.appendSanitizedTextValue(buf, textKey(keysAndValues[i]), val)
 		} else {
 			buf = append(buf, kvMissing...)
+		}
+
+		if overBudget(buf, budget) {
+			l.writeTextBuf(level, rollbackTruncated(buf, mark, false))
+			return
 		}
 	}
 
 	buf = append(buf, kvBraceClose...)
+	if trimmed {
+		buf = markTruncated(buf, false)
+	}
 	l.writeTextBuf(level, buf)
 }
 
@@ -1214,7 +1252,11 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 // 关闭时维持原先的内联断言快路径，不付任何额外成本
 func (l *Logger) appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 	sanitizing := l.sanitize != SanitizeOff
+	budget := l.lineBudget(true)
+	trimmed := false
 	for i := 0; i < len(keysAndValues); i += 2 {
+		// 记录本对 KV 之前的边界：超限时回滚到此处，保证 JSON 不被从中间切断
+		mark := len(buf)
 		buf = append(buf, ',')
 		key, ok := keysAndValues[i].(string)
 		if !ok {
@@ -1224,13 +1266,23 @@ func (l *Logger) appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 
 		if i+1 >= len(keysAndValues) {
 			buf = appendJSONValue(buf, "<missing>")
+			if overBudget(buf, budget) {
+				return rollbackTruncated(buf, mark, true)
+			}
 			continue
 		}
 		if sanitizing {
-			buf = l.appendSanitizedJSONValue(buf, key, keysAndValues[i+1])
+			val, cut := l.clampValue(keysAndValues[i+1], valueRoom(buf, budget))
+			trimmed = trimmed || cut
+			buf = l.appendSanitizedJSONValue(buf, key, val)
+			if overBudget(buf, budget) {
+				return rollbackTruncated(buf, mark, true)
+			}
 			continue
 		}
-		switch v := keysAndValues[i+1].(type) {
+		val, cut := l.clampValue(keysAndValues[i+1], valueRoom(buf, budget))
+		trimmed = trimmed || cut
+		switch v := val.(type) {
 		case string:
 			buf = appendJSONString(buf, v)
 		case int:
@@ -1238,6 +1290,13 @@ func (l *Logger) appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
 		default:
 			buf = appendJSONValue(buf, v)
 		}
+
+		if overBudget(buf, budget) {
+			return rollbackTruncated(buf, mark, true)
+		}
+	}
+	if trimmed {
+		buf = markTruncated(buf, true)
 	}
 	return buf
 }
@@ -1268,18 +1327,30 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
+	budget := l.lineBudget(false)
+	trimmed := false
 	first := true
 	for k, v := range fields {
+		mark := len(buf)
 		if !first {
 			buf = append(buf, kvDelimiter...)
 		}
 		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = l.appendSanitizedTextValue(buf, k, v)
+		val, cut := l.clampValue(v, valueRoom(buf, budget))
+		trimmed = trimmed || cut
+		buf = l.appendSanitizedTextValue(buf, k, val)
+		if overBudget(buf, budget) {
+			l.writeTextBuf(level, rollbackTruncated(buf, mark, false))
+			return
+		}
 		first = false
 	}
 
 	buf = append(buf, kvBraceClose...)
+	if trimmed {
+		buf = markTruncated(buf, false)
+	}
 	l.writeTextBuf(level, buf)
 }
 
