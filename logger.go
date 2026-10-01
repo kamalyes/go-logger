@@ -859,7 +859,7 @@ func (l *Logger) logWithContextJSON(ctx context.Context, level LogLevel, msg str
 
 	buf = append(buf, '{')
 	buf = l.appendJSONHeader(buf, level, msg, nil)
-	buf = l.appendContextFieldsJSON(buf, ctx, nil)
+	buf = l.appendContextFieldsJSON(buf, ctx, nil, nil)
 	l.writeJSONTail(level, buf)
 }
 
@@ -956,27 +956,25 @@ func (l *Logger) Fatalf(format string, args ...any) {
 }
 
 // WithField 添加字段信息（结构化日志）
+// 字段在此处一次性预编码，子 Logger 后续每条日志只做一次 memcpy（见 fields.go）
 func (l *Logger) WithField(key string, value any) ILogger {
-	return &fieldLogger{
-		logger: l,
-		fields: map[string]any{key: value},
-	}
+	return newFieldLoggerAdd(l, nil, key, value)
 }
 
 // WithFields 添加多个字段信息（结构化日志）
+// 字段按键排序后预编码，保证同一子 Logger 打出的 JSON 字段顺序稳定
 func (l *Logger) WithFields(fields map[string]any) ILogger {
 	if len(fields) == 0 {
 		return l
 	}
-
-	return &fieldLogger{
-		logger: l,
-		fields: fields,
-	}
+	return newFieldLogger(l, fieldsFromMap(fields))
 }
 
 // WithError 添加错误信息
 func (l *Logger) WithError(err error) ILogger {
+	if err == nil {
+		return l
+	}
 	return l.WithField("error", err.Error())
 }
 
@@ -1298,7 +1296,7 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
-		buf = l.appendContextFieldsJSON(buf, ctx, keysAndValues)
+		buf = l.appendContextFieldsJSON(buf, ctx, keysAndValues, nil)
 		buf = appendKVPairsJSON(buf, keysAndValues)
 		l.writeJSONTail(level, buf)
 		return
@@ -1623,11 +1621,7 @@ func (l *Logger) SetShowCaller(show bool) {
 // fieldLogger - 字段日志包装器（用于 WithField/WithFields）
 // ============================================================================
 
-// fieldLogger 轻量级字段日志器包装
-type fieldLogger struct {
-	logger *Logger
-	fields map[string]any
-}
+// fieldLogger 的类型定义、预编码与写出路径见 fields.go
 
 // 实现所有 ILogger 接口方法，将字段附加到日志消息
 
@@ -1640,7 +1634,7 @@ func (f *fieldLogger) Debug(format string, args ...any) {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
-	f.logger.logWithFields(DEBUG, msg, f.fields)
+	f.logger.logPreFieldsKV(DEBUG, msg, f, nil)
 }
 
 // Info 信息日志
@@ -1652,7 +1646,7 @@ func (f *fieldLogger) Info(format string, args ...any) {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
-	f.logger.logWithFields(INFO, msg, f.fields)
+	f.logger.logPreFieldsKV(INFO, msg, f, nil)
 }
 
 // Warn 警告日志
@@ -1664,7 +1658,7 @@ func (f *fieldLogger) Warn(format string, args ...any) {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
-	f.logger.logWithFields(WARN, msg, f.fields)
+	f.logger.logPreFieldsKV(WARN, msg, f, nil)
 }
 
 // Error 错误日志
@@ -1676,7 +1670,7 @@ func (f *fieldLogger) Error(format string, args ...any) {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
-	f.logger.logWithFields(ERROR, msg, f.fields)
+	f.logger.logPreFieldsKV(ERROR, msg, f, nil)
 }
 
 // Fatal 致命错误日志
@@ -1685,7 +1679,7 @@ func (f *fieldLogger) Fatal(format string, args ...any) {
 	if len(args) > 0 {
 		msg = fmt.Sprintf(format, args...)
 	}
-	f.logger.logWithFields(FATAL, msg, f.fields)
+	f.logger.logPreFieldsKV(FATAL, msg, f, nil)
 }
 
 // Printf风格方法
@@ -1714,32 +1708,32 @@ func (f *fieldLogger) DebugMsg(msg string) {
 	if LogLevel(f.logger.level.Load()) > DEBUG {
 		return
 	}
-	f.logger.logWithFields(DEBUG, msg, f.fields)
+	f.logger.logPreFieldsKV(DEBUG, msg, f, nil)
 }
 
 func (f *fieldLogger) InfoMsg(msg string) {
 	if !f.logger.IsLevelEnabled(INFO) {
 		return
 	}
-	f.logger.logWithFields(INFO, msg, f.fields)
+	f.logger.logPreFieldsKV(INFO, msg, f, nil)
 }
 
 func (f *fieldLogger) WarnMsg(msg string) {
 	if !f.logger.IsLevelEnabled(WARN) {
 		return
 	}
-	f.logger.logWithFields(WARN, msg, f.fields)
+	f.logger.logPreFieldsKV(WARN, msg, f, nil)
 }
 
 func (f *fieldLogger) ErrorMsg(msg string) {
 	if !f.logger.IsLevelEnabled(ERROR) {
 		return
 	}
-	f.logger.logWithFields(ERROR, msg, f.fields)
+	f.logger.logPreFieldsKV(ERROR, msg, f, nil)
 }
 
 func (f *fieldLogger) FatalMsg(msg string) {
-	f.logger.logWithFields(FATAL, msg, f.fields)
+	f.logger.logPreFieldsKV(FATAL, msg, f, nil)
 }
 
 // 多行日志方法
@@ -1748,7 +1742,7 @@ func (f *fieldLogger) InfoLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		f.logger.logWithFields(INFO, line, f.fields)
+		f.logger.logPreFieldsKV(INFO, line, f, nil)
 	}
 }
 
@@ -1757,7 +1751,7 @@ func (f *fieldLogger) ErrorLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		f.logger.logWithFields(ERROR, line, f.fields)
+		f.logger.logPreFieldsKV(ERROR, line, f, nil)
 	}
 }
 
@@ -1766,7 +1760,7 @@ func (f *fieldLogger) WarnLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		f.logger.logWithFields(WARN, line, f.fields)
+		f.logger.logPreFieldsKV(WARN, line, f, nil)
 	}
 }
 
@@ -1775,7 +1769,7 @@ func (f *fieldLogger) DebugLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		f.logger.logWithFields(DEBUG, line, f.fields)
+		f.logger.logPreFieldsKV(DEBUG, line, f, nil)
 	}
 }
 
@@ -1785,20 +1779,8 @@ func (f *fieldLogger) logWithContextFieldsLines(ctx context.Context, level LogLe
 	if level < LogLevel(f.logger.level.Load()) {
 		return
 	}
-	if f.logger.format == FormatJSON {
-		fields := f.mergeContextFields(ctx)
-		for _, line := range lines {
-			f.logger.ultraLogWithFields(level, line, fields)
-		}
-		return
-	}
-	contextInfo := f.logger.extractContextInfo(ctx)
 	for _, line := range lines {
-		msg := line
-		if contextInfo != "" {
-			msg = contextInfo + line
-		}
-		f.logger.logWithFields(level, msg, f.fields)
+		f.logger.logPreFieldsCtx(ctx, level, line, f, nil)
 	}
 }
 
@@ -1819,42 +1801,21 @@ func (f *fieldLogger) ErrorContextLines(ctx context.Context, lines ...string) {
 	f.logWithContextFieldsLines(ctx, ERROR, lines...)
 }
 
-// mergeContextFields 合并 context 提取的 fields 和 f.fields（用于 JSON 模式）
-// traceId 等上下文字段与 f.fields 合并，f.fields 优先级更高（避免被覆盖）
-func (f *fieldLogger) mergeContextFields(ctx context.Context) map[string]any {
-	ctxFields := f.logger.extractContextFields(ctx)
-	if len(f.fields) == 0 {
-		return ctxFields
-	}
-	if ctxFields == nil {
-		return f.fields
-	}
-	merged := make(map[string]any, len(ctxFields)+len(f.fields))
-	for k, v := range ctxFields {
-		merged[k] = v
-	}
-	for k, v := range f.fields {
-		merged[k] = v
-	}
-	return merged
-}
-
 // logWithContextFieldsFormat 是 fieldLogger.*Context 系列方法的公共实现
-// 统一处理 level 检查、JSON/text 模式分支、traceId + f.fields 合并
+// 统一处理 level 检查、格式化、ctx 字段与预编码字段的写出
+//
+// 改造前此处先经 mergeContextFields 把 ctx 字段与 f.fields 合并成一个新 map，
+// 再交 ultraLogWithFields 遍历 map 重新编码——每条带 ctx 的日志一次 map 分配
+// 加一轮遍历；现由 logPreFieldsCtx 直写条目缓冲，预编码片段一次 memcpy
 func (f *fieldLogger) logWithContextFieldsFormat(ctx context.Context, level LogLevel, format string, args ...any) {
 	if level < LogLevel(f.logger.level.Load()) {
 		return
 	}
-	msg := fmt.Sprintf(format, args...)
-	if f.logger.format == FormatJSON {
-		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
-		return
+	msg := format
+	if len(args) > 0 {
+		msg = fmt.Sprintf(format, args...)
 	}
-	contextInfo := f.logger.extractContextInfo(ctx)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(level, msg, f.fields)
+	f.logger.logPreFieldsCtx(ctx, level, msg, f, nil)
 }
 
 // 上下文日志方法
@@ -1883,37 +1844,32 @@ func (f *fieldLogger) DebugKV(msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(DEBUG) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(DEBUG, msg, allFields...)
+	f.logger.logPreFieldsKV(DEBUG, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) InfoKV(msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(INFO) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(INFO, msg, allFields...)
+	f.logger.logPreFieldsKV(INFO, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) WarnKV(msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(WARN) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(WARN, msg, allFields...)
+	f.logger.logPreFieldsKV(WARN, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) ErrorKV(msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(ERROR) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(ERROR, msg, allFields...)
+	f.logger.logPreFieldsKV(ERROR, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) FatalKV(msg string, keysAndValues ...any) {
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(FATAL, msg, allFields...)
+	f.logger.logPreFieldsKV(FATAL, msg, f, keysAndValues)
 }
 
 // 带上下文的键值对日志方法
@@ -1921,37 +1877,32 @@ func (f *fieldLogger) DebugContextKV(ctx context.Context, msg string, keysAndVal
 	if !f.logger.IsLevelEnabled(DEBUG) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithContextKV(ctx, DEBUG, msg, allFields...)
+	f.logger.logPreFieldsCtx(ctx, DEBUG, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(INFO) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithContextKV(ctx, INFO, msg, allFields...)
+	f.logger.logPreFieldsCtx(ctx, INFO, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(WARN) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithContextKV(ctx, WARN, msg, allFields...)
+	f.logger.logPreFieldsCtx(ctx, WARN, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(ERROR) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithContextKV(ctx, ERROR, msg, allFields...)
+	f.logger.logPreFieldsCtx(ctx, ERROR, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...any) {
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithContextKV(ctx, FATAL, msg, allFields...)
+	f.logger.logPreFieldsCtx(ctx, FATAL, msg, f, keysAndValues)
 }
 
 // 字段映射方法
@@ -1997,31 +1948,21 @@ func (f *fieldLogger) Log(level LogLevel, msg string) {
 	if !f.logger.IsLevelEnabled(level) {
 		return
 	}
-	f.logger.logWithFields(level, msg, f.fields)
+	f.logger.logPreFieldsKV(level, msg, f, nil)
 }
 
 func (f *fieldLogger) LogContext(ctx context.Context, level LogLevel, msg string) {
 	if !f.logger.IsLevelEnabled(level) {
 		return
 	}
-	// JSON 模式：traceId 和 f.fields 都作为 JSON 顶层字段
-	if f.logger.format == FormatJSON {
-		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
-		return
-	}
-	contextInfo := f.logger.extractContextInfo(ctx)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(level, msg, f.fields)
+	f.logger.logPreFieldsCtx(ctx, level, msg, f, nil)
 }
 
 func (f *fieldLogger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
 	if !f.logger.IsLevelEnabled(level) {
 		return
 	}
-	allFields := f.mergeKV(keysAndValues...)
-	f.logger.logWithKV(level, msg, allFields...)
+	f.logger.logPreFieldsKV(level, msg, f, keysAndValues)
 }
 
 func (f *fieldLogger) LogWithFields(level LogLevel, msg string, fields map[string]any) {
@@ -2044,17 +1985,7 @@ func (f *fieldLogger) LogSpecialContext(ctx context.Context, logType SpecialLogT
 	} else {
 		msg += fmt.Sprintf(format, args...)
 	}
-	// JSON 模式：traceId 和 f.fields 都作为 JSON 顶层字段
-	if f.logger.format == FormatJSON {
-		f.logger.ultraLogWithFields(level, msg, f.mergeContextFields(ctx))
-		return
-	}
-	// text 模式：ctx 信息前缀
-	contextInfo := f.logger.extractContextInfo(ctx)
-	if contextInfo != "" {
-		msg = contextInfo + msg
-	}
-	f.logger.logWithFields(level, msg, f.fields)
+	f.logger.logPreFieldsCtx(ctx, level, msg, f, nil)
 }
 
 // 配置方法
@@ -2079,40 +2010,22 @@ func (f *fieldLogger) IsLevelEnabled(level LogLevel) bool {
 }
 
 // 结构化日志构建器
+// 子 Logger 在此处完成字段合并与一次性预编码，后续每条日志只做一次 memcpy
 func (f *fieldLogger) WithField(key string, value any) ILogger {
-	// 按实际所需容量分配 map，避免过度预分配
-	newFields := make(map[string]any, len(f.fields)+1)
-
-	// 复制现有字段
-	for k, v := range f.fields {
-		newFields[k] = v
-	}
-	newFields[key] = value
-
-	return &fieldLogger{logger: f.logger, fields: newFields}
+	return newFieldLoggerAdd(f.logger, f, key, value)
 }
 
 func (f *fieldLogger) WithFields(fields map[string]any) ILogger {
 	if len(fields) == 0 {
 		return f
 	}
-
-	// 按实际所需容量分配 map
-	newFields := make(map[string]any, len(f.fields)+len(fields))
-
-	// 复制现有字段
-	for k, v := range f.fields {
-		newFields[k] = v
-	}
-	// 添加新字段
-	for k, v := range fields {
-		newFields[k] = v
-	}
-
-	return &fieldLogger{logger: f.logger, fields: newFields}
+	return newFieldLogger(f.logger, extendFields(f.fields, fieldsFromMap(fields)))
 }
 
 func (f *fieldLogger) WithError(err error) ILogger {
+	if err == nil {
+		return f
+	}
 	return f.WithField("error", err.Error())
 }
 
@@ -2121,12 +2034,9 @@ func (f *fieldLogger) WithContext(ctx context.Context) ILogger {
 }
 
 // Clone 克隆当前Logger
+// fields 与 preJSON 构造后即不可变，故新实例直接共享，无需深拷贝
 func (f *fieldLogger) Clone() ILogger {
-	newFields := make(map[string]any, len(f.fields))
-	for k, v := range f.fields {
-		newFields[k] = v
-	}
-	return &fieldLogger{logger: f.logger, fields: newFields}
+	return &fieldLogger{logger: f.logger, fields: f.fields, preJSON: f.preJSON}
 }
 
 // 兼容标准log包的方法
@@ -2134,14 +2044,14 @@ func (f *fieldLogger) Print(args ...any) {
 	if !f.logger.IsLevelEnabled(INFO) {
 		return
 	}
-	f.logger.logWithFields(INFO, fmt.Sprint(args...), f.fields)
+	f.logger.logPreFieldsKV(INFO, fmt.Sprint(args...), f, nil)
 }
 
 func (f *fieldLogger) Printf(format string, args ...any) {
 	if !f.logger.IsLevelEnabled(INFO) {
 		return
 	}
-	f.logger.logWithFields(INFO, fmt.Sprintf(format, args...), f.fields)
+	f.logger.logPreFieldsKV(INFO, fmt.Sprintf(format, args...), f, nil)
 }
 
 func (f *fieldLogger) Println(args ...any) {
@@ -2149,7 +2059,7 @@ func (f *fieldLogger) Println(args ...any) {
 		return
 	}
 	msg := fmt.Sprintln(args...)
-	f.logger.logWithFields(INFO, msg[:len(msg)-1], f.fields)
+	f.logger.logPreFieldsKV(INFO, msg[:len(msg)-1], f, nil)
 }
 
 // 返回错误的日志方法
@@ -2240,41 +2150,17 @@ func (f *fieldLogger) NewConsoleGroup() *ConsoleGroup {
 	return f.logger.getOrCreateConsoleGroup()
 }
 
-// 辅助方法：合并字段和键值对
-func (f *fieldLogger) mergeKV(keysAndValues ...any) []any {
-	totalLen := len(f.fields)*2 + len(keysAndValues)
-	result := make([]any, 0, totalLen)
-
-	// 添加现有字段
-	for k, v := range f.fields {
-		result = append(result, k, v)
-	}
-
-	// 添加传入的键值对
-	result = append(result, keysAndValues...)
-
-	return result
-}
-
 // 辅助方法：合并字段映射
+// 低频 API（*WithFields(msg, map)）的临时合并，允许一次分配；
+// 热路径的 KV 与预编码字段由 logPreFieldsKV 直写，不经此处
 func (f *fieldLogger) mergeFieldsMap(fields map[string]any) map[string]any {
-	if len(fields) == 0 {
-		return f.fields
-	}
-
-	// 按实际所需容量分配 map
 	merged := make(map[string]any, len(f.fields)+len(fields))
-
-	// 添加现有字段
-	for k, v := range f.fields {
-		merged[k] = v
+	for i := range f.fields {
+		merged[f.fields[i].key] = f.fields[i].value
 	}
-
-	// 添加传入的字段
 	for k, v := range fields {
 		merged[k] = v
 	}
-
 	return merged
 }
 

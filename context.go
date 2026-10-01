@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-08 02:07:30
+ * @LastEditTime: 2026-10-01 10:38:52
  * @FilePath: \go-logger\context.go
  * @Description:
  *
@@ -192,16 +192,15 @@ func extractContextFieldsWithCompiledKeys(ctx context.Context, keys []compiledCo
 
 // appendContextFieldsJSON 将 ctx 字段直写为 JSON 顶层字段（零 map 分配）
 // 与 extractContextFields 语义一致（contextExtractor 降级 / OTel traceId 单一真相源），
-// 区别在于：kv 非空时跳过与 KV 同名的 key（KV 优先级高于 ctx，与 map 合并覆盖语义一致），
-// 由调用方在 ctx 之后写入 KV 值
-func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []any) []byte {
+// 区别在于：跳过已由 KV 或预编码字段（pre）提供的同名 key——两者优先级都高于 ctx，与 map 合并的覆盖语义一致，由调用方在 ctx 之后写入各自的值
+func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []any, pre []logField) []byte {
 	if ctx == nil {
 		return buf
 	}
 	if l.contextExtractor != nil {
 		info := l.contextExtractor(ctx)
 		if info = strings.TrimSpace(info); info != "" {
-			if !kvContainsKey(kv, "context") {
+			if !overridesContextKey(kv, pre, "context") {
 				buf = append(buf, ',')
 				buf = appendJSONKey(buf, "context")
 				buf = appendJSONString(buf, info)
@@ -215,22 +214,23 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 	otelTraceID := extractOTelTraceID(ctx)
 	traceIDHandled := false
 	if otelTraceID != "" {
-		if !kvContainsKey(kv, ContextKeyTraceID) {
+		if !overridesContextKey(kv, pre, ContextKeyTraceID) {
 			buf = append(buf, ',')
 			buf = appendJSONKey(buf, ContextKeyTraceID)
 			buf = appendJSONString(buf, otelTraceID)
 		}
-		// 无论是否写出（KV 提供同名时跳过），trace_id 均视为已处理，避免 keys 循环重复写
+		// 无论是否写出（KV/预编码字段提供同名时跳过），trace_id 均视为已处理，
+		// 避免 keys 循环重复写
 		traceIDHandled = true
 	}
 
 	for _, key := range l.contextKeys {
-		// trace_id 已由 OTel 写入或由 KV 提供，跳过
+		// trace_id 已由 OTel 写入或由 KV/预编码字段提供，跳过
 		if key.key == ContextKeyTraceID && traceIDHandled {
 			continue
 		}
 		value := extractKeyValue(ctx, key, otelTraceID)
-		if value == "" || kvContainsKey(kv, key.key) {
+		if value == "" || overridesContextKey(kv, pre, key.key) {
 			continue
 		}
 		buf = append(buf, ',')
@@ -241,6 +241,11 @@ func (l *Logger) appendContextFieldsJSON(buf []byte, ctx context.Context, kv []a
 	}
 
 	return buf
+}
+
+// overridesContextKey 报告 KV 参数或预编码字段是否已提供指定 key
+func overridesContextKey(kv []any, pre []logField, key string) bool {
+	return kvContainsKey(kv, key) || fieldsContainKey(pre, key)
 }
 
 // kvContainsKey 报告键值对参数中是否已提供指定 key（KV 优先判重用）
