@@ -276,7 +276,7 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	}
 
 	// 添加消息
-	buf = appendTextSafe(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, false)
 	l.writeTextBuf(level, buf)
 }
 
@@ -297,7 +297,7 @@ func (l *Logger) writeJSONEntry(level LogLevel, msg string, fields map[string]an
 	for k, v := range fields {
 		buf = append(buf, ',')
 		buf = appendJSONKey(buf, k)
-		buf = appendJSONValue(buf, v)
+		buf = l.appendSanitizedJSONValue(buf, k, v)
 	}
 
 	l.writeJSONTail(level, buf)
@@ -328,7 +328,7 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 
 	// message
 	buf = append(buf, l.messageKey...)
-	buf = appendJSONString(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, true)
 
 	// caller（如果启用）- 用循环回溯找到第一个 go-logger 包外的调用者
 	// 直接拼接缓存中预转义的 file:line 与函数名片段，零转义扫描
@@ -381,7 +381,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = appendTextSafe(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -391,7 +391,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 		}
 		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = appendValueSafe(buf, v)
+		buf = l.appendSanitizedTextValue(buf, k, v)
 		first = false
 	}
 
@@ -1170,7 +1170,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
-		buf = appendKVPairsJSON(buf, keysAndValues)
+		buf = l.appendKVPairsJSON(buf, keysAndValues)
 		l.writeJSONTail(level, buf)
 		return
 	}
@@ -1181,7 +1181,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = appendTextSafe(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
 	for i := 0; i < len(keysAndValues); i += 2 {
@@ -1195,7 +1195,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 
 		// 值
 		if i+1 < len(keysAndValues) {
-			buf = appendValueSafe(buf, keysAndValues[i+1])
+			buf = l.appendSanitizedTextValue(buf, textKey(keysAndValues[i]), keysAndValues[i+1])
 		} else {
 			buf = append(buf, kvMissing...)
 		}
@@ -1209,25 +1209,34 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 // 奇数个参数时落单的 key 输出 "<missing>" 值，与 text 模式语义一致
 // key 与 value 的 string/int 断言均内联在循环内：覆盖最常见类型，
 // 省去每对 KV 的函数调用（appendJSONValue 的大 switch 与 fmt.Sprint 罕见分支会阻碍内联）
-func appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
+//
+// 脱敏开启时逐对走 appendSanitizedJSONValue（按字段名判定，零分配）；
+// 关闭时维持原先的内联断言快路径，不付任何额外成本
+func (l *Logger) appendKVPairsJSON(buf []byte, keysAndValues []any) []byte {
+	sanitizing := l.sanitize != SanitizeOff
 	for i := 0; i < len(keysAndValues); i += 2 {
 		buf = append(buf, ',')
-		if k, ok := keysAndValues[i].(string); ok {
-			buf = appendJSONKey(buf, k)
-		} else {
-			buf = appendJSONKey(buf, fmt.Sprint(keysAndValues[i]))
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			key = fmt.Sprint(keysAndValues[i])
 		}
-		if i+1 < len(keysAndValues) {
-			switch v := keysAndValues[i+1].(type) {
-			case string:
-				buf = appendJSONString(buf, v)
-			case int:
-				buf = strconv.AppendInt(buf, int64(v), 10)
-			default:
-				buf = appendJSONValue(buf, v)
-			}
-		} else {
+		buf = appendJSONKey(buf, key)
+
+		if i+1 >= len(keysAndValues) {
 			buf = appendJSONValue(buf, "<missing>")
+			continue
+		}
+		if sanitizing {
+			buf = l.appendSanitizedJSONValue(buf, key, keysAndValues[i+1])
+			continue
+		}
+		switch v := keysAndValues[i+1].(type) {
+		case string:
+			buf = appendJSONString(buf, v)
+		case int:
+			buf = strconv.AppendInt(buf, int64(v), 10)
+		default:
+			buf = appendJSONValue(buf, v)
 		}
 	}
 	return buf
@@ -1256,7 +1265,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = appendTextSafe(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -1266,7 +1275,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 		}
 		buf = appendTextSafe(buf, k)
 		buf = append(buf, kvSeparator...)
-		buf = appendValueSafe(buf, v)
+		buf = l.appendSanitizedTextValue(buf, k, v)
 		first = false
 	}
 
@@ -1297,7 +1306,7 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = l.appendContextFieldsJSON(buf, ctx, keysAndValues, nil)
-		buf = appendKVPairsJSON(buf, keysAndValues)
+		buf = l.appendKVPairsJSON(buf, keysAndValues)
 		l.writeJSONTail(level, buf)
 		return
 	}

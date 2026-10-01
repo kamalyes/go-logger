@@ -49,6 +49,10 @@ type Logger struct {
 	format         FormatType
 	callerDepth    int
 	showStacktrace bool
+	// sanitize 脱敏强度，默认 SanitizeKeys（按字段名擦除凭据与掩码 PII）
+	// 按字段名判定是零分配的，故默认开启不带来可观测的成本；
+	// 值内容扫描要逐条扫文本且可能误伤业务正文，需显式升到 SanitizeKeysAndValues
+	sanitize SanitizeMode
 
 	// 字段名配置：热路径 4 键直接存预构建 "key": JSON 片段（设置时构建一次，单次 append 拷贝），
 	// 默认值共享包级片段（defaultXxxKey，见 logger.go）；stacktrace 为冷路径保留原字符串
@@ -188,6 +192,7 @@ func NewLogger() *Logger {
 		format:         FormatJSON,
 		callerDepth:    2,
 		showStacktrace: false,
+		sanitize:       SanitizeKeys,
 		timestampKey:   defaultTimestampKey,
 		levelKey:       defaultLevelKey,
 		messageKey:     defaultMessageKey,
@@ -363,6 +368,7 @@ func (l *Logger) Clone() ILogger {
 	newLogger.format = l.format
 	newLogger.callerDepth = l.callerDepth
 	newLogger.showStacktrace = l.showStacktrace
+	newLogger.sanitize = l.sanitize
 	newLogger.timestampKey = l.timestampKey
 	newLogger.levelKey = l.levelKey
 	newLogger.messageKey = l.messageKey

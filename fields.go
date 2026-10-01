@@ -126,7 +126,7 @@ func newFieldLoggerAdd(l *Logger, parent *fieldLogger, key string, value any) *f
 	if parent != nil {
 		pre = append(pre, parent.preJSON...)
 	}
-	f.preJSON = appendFieldJSON(pre, key, value)
+	f.preJSON = l.appendFieldJSON(pre, key, value)
 	return f
 }
 
@@ -138,7 +138,7 @@ func (f *fieldLogger) encodePreJSON() {
 		pre = make([]byte, 0, est)
 	}
 	for i := range f.fields {
-		pre = appendFieldJSON(pre, f.fields[i].key, f.fields[i].value)
+		pre = f.logger.appendFieldJSON(pre, f.fields[i].key, f.fields[i].value)
 	}
 	f.preJSON = pre
 }
@@ -157,10 +157,13 @@ func estimatedFieldJSONSize(fields []logField) int {
 }
 
 // appendFieldJSON 追加单个字段的 JSON 片段（含前导逗号）
-func appendFieldJSON(buf []byte, key string, value any) []byte {
+//
+// 脱敏在此处完成：固定字段每个子 Logger 只编码一次，因此按字段名判定的成本
+// 被摊进构造阶段，之后每条日志都是现成的脱敏结果，热路径零额外开销
+func (l *Logger) appendFieldJSON(buf []byte, key string, value any) []byte {
 	buf = append(buf, ',')
 	buf = appendJSONKey(buf, key)
-	return appendJSONValue(buf, value)
+	return l.appendSanitizedJSONValue(buf, key, value)
 }
 
 // fieldsFromMap 把 map 转为有序字段列表（按键排序，保证输出稳定）
@@ -252,7 +255,7 @@ func (l *Logger) logPreFieldsKV(level LogLevel, msg string, f *fieldLogger, kv [
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = append(buf, f.preJSON...)
-		buf = appendKVPairsJSON(buf, kv)
+		buf = l.appendKVPairsJSON(buf, kv)
 		l.writeJSONTail(level, buf)
 		return
 	}
@@ -281,7 +284,7 @@ func (l *Logger) logPreFieldsCtx(ctx context.Context, level LogLevel, msg string
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = l.appendContextFieldsJSON(buf, ctx, kv, f.fields)
 		buf = append(buf, f.preJSON...)
-		buf = appendKVPairsJSON(buf, kv)
+		buf = l.appendKVPairsJSON(buf, kv)
 		l.writeJSONTail(level, buf)
 		return
 	}
@@ -306,7 +309,7 @@ func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, 
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
 	buf = l.appendTextHeader(buf, level)
-	buf = appendTextSafe(buf, msg)
+	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
 	first := true
@@ -316,7 +319,7 @@ func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, 
 		}
 		buf = appendTextSafe(buf, fields[i].key)
 		buf = append(buf, kvSeparator...)
-		buf = appendValueSafe(buf, fields[i].value)
+		buf = l.appendSanitizedTextValue(buf, fields[i].key, fields[i].value)
 		first = false
 	}
 	for i := 0; i < len(kv); i += 2 {
@@ -326,7 +329,7 @@ func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, 
 		buf = appendValueSafe(buf, kv[i])
 		buf = append(buf, kvSeparator...)
 		if i+1 < len(kv) {
-			buf = appendValueSafe(buf, kv[i+1])
+			buf = l.appendSanitizedTextValue(buf, textKey(kv[i]), kv[i+1])
 		} else {
 			buf = append(buf, kvMissing...)
 		}
