@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-08 02:07:30
+ * @LastEditTime: 2026-10-01 18:30:05
  * @FilePath: \go-logger\types.go
  * @Description: 核心类型定义
  *
@@ -49,6 +49,13 @@ type Logger struct {
 	format         FormatType
 	callerDepth    int
 	showStacktrace bool
+	// 服务身份字段（见 identity.go）：设置时预编码成片段，日志路径只做一次 memcpy
+	service      string
+	instance     string
+	env          string
+	identityJSON []byte
+	identityText []byte
+
 	// maxLineBytes 单条日志字节上限（默认 DefaultMaxLineBytes），<=0 不限制
 	// maxFieldBytes 单字段值字节上限（默认不限制），<=0 不限制
 	maxLineBytes  int
@@ -374,6 +381,11 @@ func (l *Logger) Clone() ILogger {
 	newLogger.callerDepth = l.callerDepth
 	newLogger.showStacktrace = l.showStacktrace
 	newLogger.sanitize = l.sanitize
+	newLogger.service = l.service
+	newLogger.instance = l.instance
+	newLogger.env = l.env
+	newLogger.identityJSON = l.identityJSON
+	newLogger.identityText = l.identityText
 	newLogger.maxLineBytes = l.maxLineBytes
 	newLogger.maxFieldBytes = l.maxFieldBytes
 	newLogger.timestampKey = l.timestampKey

@@ -179,6 +179,9 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 	// 添加级别前缀
 	buf = append(buf, l.getLevelPrefix(level)...)
 
+	// 服务身份（预编码片段）
+	buf = append(buf, l.identityText...)
+
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
 		if ci := l.findExternalCaller(3, 6); ci != nil {
@@ -262,6 +265,9 @@ func (l *Logger) ultraLog(level LogLevel, msg string) {
 	// 添加级别前缀
 	buf = append(buf, l.getLevelPrefix(level)...)
 
+	// 服务身份（预编码片段）
+	buf = append(buf, l.identityText...)
+
 	// 添加调用者信息（如果需要）
 	if l.showCaller.Load() {
 		if ci := l.findExternalCaller(3, 6); ci != nil {
@@ -332,6 +338,9 @@ func (l *Logger) appendJSONHeader(buf []byte, level LogLevel, msg string, ci *ca
 	buf = append(buf, '"')
 	buf = append(buf, getLevelName(level)...)
 	buf = append(buf, '"')
+
+	// 服务身份（预编码片段，一次 memcpy）
+	buf = append(buf, l.identityJSON...)
 
 	// prefix（如果有）
 	if l.prefix != "" {
