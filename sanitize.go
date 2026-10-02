@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2026-01-26 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-01-26 00:00:00
+ * @LastEditTime: 2026-10-02 09:57:31
  * @FilePath: \go-logger\sanitize.go
  * @Description: 敏感字段脱敏（按字段名零分配判定 + 可选的值内容扫描）
  *
@@ -259,15 +259,21 @@ func hasNormalizedSuffix(key, suffix string) bool {
 //     一次数组访问即可跳过整个精确表查询
 //  2. 后缀字典树：按归一化字符反向回溯，一次走完即可排除所有不可能的后缀，而非逐条规则各做一次尾部扫描
 
-// 形状位图维度：首字符 27 档（a-z 各一档，其余归入末档），长度 0..48
+// 形状位图维度：首字符与末字符各 27 档（a-z 各一档，其余归入末档），长度 0..63
 const (
 	shapeBuckets  = 27
-	maxShapeLen   = 48
+	maxShapeLen   = 63
 	otherShapeIdx = 26
 )
 
-// exactKeyShapes 标记精确表中是否存在某形状（首字符 + 归一化长度）的字段名
-var exactKeyShapes [shapeBuckets][maxShapeLen + 1]bool
+// exactKeyShapes 标记精确表中是否存在某形状的字段名
+//
+// 形状取(首字符, 末字符, 归一化长度)三元组，长度以 uint64 的位存放。
+// 只用(首字符, 长度)二元组时误命中偏多——cache_key 与 csrftoken 同为 c 开头、
+// 归一化长度 8，于是每个 cache_key 都要白做一次完整归一化加一次查表（实测
+// 单字段 8.2 ns 升到 17.4 ns）。补上末字符后二者分别落在 c/y 与 c/n 两格，
+// ip_address（i/s）、error_code（e/e）、idempotency_key（i/y）同样全部落空
+var exactKeyShapes [shapeBuckets][shapeBuckets]uint64
 
 // suffixTrie 后缀字典树的根（按归一化字符反向构建）
 //
@@ -305,6 +311,9 @@ func insertSuffix(suffix string, action redactAction) {
 
 // matchSuffix 沿字典树反向回溯字段名，返回最长匹配后缀对应的动作
 // 边回溯边跳过 _ - . 并转小写，无需构造归一化串，故零分配
+//
+// 命中敏感后缀后再查运维豁免表：豁免只在命中时才有意义，而未命中的字段名
+// （生产里的绝大多数）由此完全不必为豁免判定付代价
 func matchSuffix(key string) redactAction {
 	node := suffixTrie
 	action := keepAsIs
@@ -327,19 +336,35 @@ func matchSuffix(key string) redactAction {
 			action = node.action // 继续回溯，更长的后缀会覆盖
 		}
 	}
+	if action != keepAsIs && isOpsVisibleKey(key) {
+		return keepAsIs
+	}
 	return action
+}
+
+// isOpsVisibleKey 报告字段名是否属于必须保持可见的运维字段
+//
+// 单列豁免表（而非仅靠不收录对应敏感后缀）是为了防止后缀表日后扩充时
+// 把排障主线索连带擦掉——那种失败不报错，只是日志静默失去价值
+func isOpsVisibleKey(key string) bool {
+	for _, suffix := range visibleKeySuffixes {
+		if hasNormalizedSuffix(key, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // init 构建判定所需的两级索引
 // 规则表在日志路径上只读，故索引在包初始化时一次建成
 func init() {
 	for key := range exactKeyRules {
-		first, _, n, _ := keyShape(key)
-		exactKeyShapes[shapeIndex(first)][shapeLenIndex(n)] = true
+		first, last, n, _ := keyShape(key)
+		markKeyShape(first, last, n)
 	}
-	for _, suffix := range visibleKeySuffixes {
-		insertSuffix(suffix, keepAsIs)
-	}
+	// 只把敏感后缀入树。运维豁免后缀改为"命中敏感后缀后再查"——
+	// 把它们一并入树会显著加深回溯路径（cachekey 要走满 8 步、
+	// idempotencykey 14 步），而豁免判定只在真正命中时才有意义
 	for _, rule := range suffixKeyRules {
 		insertSuffix(rule.suffix, rule.action)
 	}
@@ -353,12 +378,22 @@ func shapeIndex(first byte) int {
 	return otherShapeIdx
 }
 
-// shapeLenIndex 把归一化长度映射到形状位图的次维下标（超长统一归入末档）
-func shapeLenIndex(n int) int {
+// shapeLenIndex 把归一化长度映射到位掩码的位号（超长统一归入末位）
+func shapeLenIndex(n int) uint {
 	if n > maxShapeLen {
 		return maxShapeLen
 	}
-	return n
+	return uint(n)
+}
+
+// markKeyShape 在形状位图中标记一个字段名的形状
+func markKeyShape(first, last byte, n int) {
+	exactKeyShapes[shapeIndex(first)][shapeIndex(last)] |= 1 << shapeLenIndex(n)
+}
+
+// hasKeyShape 报告精确表中是否存在该形状的字段名
+func hasKeyShape(first, last byte, n int) bool {
+	return exactKeyShapes[shapeIndex(first)][shapeIndex(last)]>>shapeLenIndex(n)&1 != 0
 }
 
 // keyShape 单趟扫描取出字段名的归一化形状
@@ -387,13 +422,13 @@ func keyShape(key string) (first, last byte, n int, needsNorm bool) {
 //
 // Go 对 m[string(byteSlice)] 有专门优化，归一化重查时的 string 转换不产生堆分配
 func actionForKey(key string) redactAction {
-	first, _, n, needsNorm := keyShape(key)
+	first, last, n, needsNorm := keyShape(key)
 	if n == 0 {
 		return keepAsIs
 	}
 
 	// 形状位图挡掉绝大多数字段名，命中才真正查精确表
-	if exactKeyShapes[shapeIndex(first)][shapeLenIndex(n)] {
+	if hasKeyShape(first, last, n) {
 		if !needsNorm {
 			if action, ok := exactKeyRules[key]; ok {
 				return action
@@ -492,7 +527,7 @@ func RegisterSensitiveKeys(keys ...string) {
 		exactKeyRules[normalized] = wipeValue
 		// 形状位图必须同步：actionForKey 以它为前置过滤，
 		// 漏更新会让新注册的字段名永远查不到精确表
-		exactKeyShapes[shapeIndex(normalized[0])][shapeLenIndex(n)] = true
+		markKeyShape(normalized[0], normalized[n-1], n)
 	}
 }
 

@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2026-01-26 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-01-26 00:00:00
+ * @LastEditTime: 2026-10-02 09:57:31
  * @FilePath: \go-logger\scan.go
  * @Description: 文本内容的敏感信息扫描（SanitizeKeysAndValues 模式，手写单遍扫描）
  *
@@ -186,8 +186,15 @@ func isTokenSeparator(c byte) bool {
 }
 
 // isAuthScheme 判断 token 是否为 Bearer/Basic 认证方案名
+// 按长度分派：两者长度不同（basic 5、bearer 6），用同一个长度判定会漏掉其中一个
 func isAuthScheme(token string) bool {
-	return len(token) == 6 && (hasFoldPrefix(token, "bearer") || hasFoldPrefix(token, "basic"))
+	switch len(token) {
+	case len("basic"):
+		return hasFoldPrefix(token, "basic")
+	case len("bearer"):
+		return hasFoldPrefix(token, "bearer")
+	}
+	return false
 }
 
 // appendScannedToken 判定单个 token 并脱敏后追加

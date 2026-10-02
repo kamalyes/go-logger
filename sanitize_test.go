@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2026-01-26 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-01-26 00:00:00
+ * @LastEditTime: 2026-10-02 09:57:31
  * @FilePath: \go-logger\sanitize_test.go
  * @Description: 脱敏规则与值扫描测试
  *
@@ -385,6 +385,27 @@ func TestLooksLikePhone(t *testing.T) {
 	for _, s := range no {
 		if looksLikePhone(s) {
 			t.Errorf("不应判定为号码: %q", s)
+		}
+	}
+}
+
+// TestScan_BasicAuthScheme Basic 与 Bearer 都必须被识别
+// 回归点：曾用 len(token) == 6 统一判定两者，而 basic 只有 5 个字符，
+// 于是 Basic 凭据完全漏掉——漏判比误判更危险，不会有任何报错
+func TestScan_BasicAuthScheme(t *testing.T) {
+	cases := map[string]string{
+		"use Bearer eyJhbGciOiJIUzI1NiJ9 now": "eyJhbGciOiJIUzI1NiJ9",
+		"use Basic dXNlcjpwYXNzd29yZA now":    "dXNlcjpwYXNzd29yZA",
+		"use basic dXNlcjpwYXNzd29yZA now":    "dXNlcjpwYXNzd29yZA",
+		"use BASIC dXNlcjpwYXNzd29yZA now":    "dXNlcjpwYXNzd29yZA",
+	}
+	for in, leaked := range cases {
+		got := string(appendScannedText(nil, in))
+		if strings.Contains(got, leaked) {
+			t.Errorf("凭据泄漏\n输入: %s\n实得: %s", in, got)
+		}
+		if !strings.Contains(got, redacted) {
+			t.Errorf("应补 [REDACTED]\n输入: %s\n实得: %s", in, got)
 		}
 	}
 }
