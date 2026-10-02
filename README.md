@@ -1,6 +1,6 @@
 # Go Logger - 企业级高性能日志库
 
-> `go-logger` 是一个现代化、高性能的 Go 日志库，专为企业级应用设计。它提供了强大的结构化日志、基于 OpenTelemetry 的分布式追踪、Console 风格日志等企业级功能，并通过对象池、零拷贝、原子操作等性能优化实现了出色的性能表现。
+> `go-logger` 是一个现代化、高性能的 Go 日志库，专为企业级应用设计。它提供结构化日志、基于 OpenTelemetry 的分布式追踪、敏感字段脱敏、单条体量上限、失败限频汇总、Console 风格日志等企业级能力；通过追加式编码、对象池、双缓冲异步写出、SWAR 扫描等优化，常规路径零堆分配。
 
 [![stable](https://img.shields.io/badge/stable-stable-green.svg)](https://github.com/kamalyes/go-logger)
 [![license](https://img.shields.io/github/license/kamalyes/go-logger)]()
@@ -38,10 +38,13 @@
 
 - **📊 结构化日志**: 支持键值对、字段映射、对象自动解析、多行日志等多种结构化方式
 - **🔍 分布式追踪**: 基于 OpenTelemetry 的链路追踪，`trace_id` 单一真相源，自动从 OTel span 提取
+- **🛡️ 开箱即用的脱敏**: 凭据、支付、证件、PII 字段默认按字段名擦除或掩码，判定零分配
+- **📏 体量可控**: 单条日志与单字段字节上限，超限按记录边界裁剪，JSON 始终合法
+- **📉 失败限频汇总**: 持续故障时把 N 条重复错误压成个位数，保留发生与恢复时间点
 - **🎨 Console 风格**: JavaScript Console 风格的分组、表格、计时器功能
 - **🔌 灵活扩展**: 多种写入器适配器（Console、File、Rotate、Buffered、Multi）、自定义上下文提取器、格式化器、钩子、中间件
-- **⚡ 高性能**: 对象池、零拷贝、原子操作、预计算常量、数组索引替 map 等性能优化
-- **🛡️ 并发安全**: 完善的并发控制，适合高并发场景
+- **⚡ 高性能**: 默认输出走双缓冲异步管道；常规路径零堆分配，JSON + 5 字段约 108 ns/op（见 [性能](#-性能)）
+- **🛡️ 并发安全**: 完善的并发控制，适合高并发场景；`-race` 全量覆盖
 - **🎯 多输出格式**: 支持 Text / JSON / XML / CSV 四种输出格式
 
 ### 核心功能
@@ -51,7 +54,7 @@
 - **Printf 风格**: `Info(format, args...)` / `Infof(format, args...)`
 - **纯文本**: `InfoMsg(msg)` - 单个消息，无格式化开销
 - **键值对**: `InfoKV(msg, key, value, ...)` - 结构化日志
-- **对象解析**: `InfoKV(msg, struct)` - 单个结构体参数自动解析为键值对（通过 `convert.ParseObjectToMap`）
+- **对象解析**: `InfoKV(msg, struct)` - 单个结构体参数自动解析为键值对（优先取 `json` tag 作字段名）
 - **字段映射**: `InfoWithFields(msg, fields)` - map 方式
 - **多行日志**: `InfoLines(line1, line2, ...)` - 自动处理多行
 - **返回错误**: `InfoReturn(format, args...)` - 记录日志并返回 error
@@ -64,6 +67,23 @@
 - **gRPC 链路传播**: `InjectTraceToOutgoing` / `ExtractTraceFromIncoming` / `RestoreTraceFromIncoming`
 - **便捷辅助函数**: `ExtractTraceID` / `ContextWithTraceID`
 - **自定义提取器**: `SetContextExtractor` / `WithContextExtractor` / `WithContextKeys`
+
+#### 🛡️ 安全与合规
+
+- **字段名脱敏（默认开启）**: 凭据与会话、支付与金融、身份证件、收货地址、自然人姓名、设备标识、预签名链接整体擦除；手机号与邮箱掩码保留尾部便于对号
+- **零分配判定**: 两级索引（形状位图 + 后缀字典树），未命中字段名 8.4 ns，不读值内容故不误伤业务正文
+- **运维字段豁免**: `status_code`、`error_code`、`grpc_code`、`ip_address`、`cache_key`、`partition_key`、`public_key` 等排障主线索单列豁免表，优先于敏感后缀判定
+- **可选的值内容扫描**: 升到 `SanitizeKeysAndValues` 后额外扫描 Bearer/Basic 凭据、三段式 JWT、邮箱、电话号码、带签名的私有链接、URL 内嵌账号密码、`key=value` 赋值；全手写单遍扫描，无正则
+- **自定义敏感字段**: `RegisterSensitiveKeys` 按业务补充清单
+- **日志注入防护**: text 模式转义控制字符，保证"一条日志恒为一行"，用户可控字段无法伪造日志行
+- **单条体量上限**: 默认 64KB，超限按记录边界回滚并补 `truncated` 标记；截断落在 UTF-8 字符边界
+
+#### 📍 可观测性
+
+- **服务身份字段**: `WithService` / `WithInstance` / `WithEnv` 输出 `service` / `instance` / `env`，实例标识可从 `INSTANCE_ID` → `POD_NAME` → `HOSTNAME` 自动推导
+- **调用点定位**: `caller` / `callerfunc` 字段，按 PC 缓存并预转义，内联感知（不会把行号报到调用行的下一行）
+- **失败限频汇总**: `FailureState` / `FailureLog` 把持续故障的重复错误压成"首条 + 每间隔一条汇总 + 恢复一条"，附 `failure_count` / `suppressed_count` / `failure_duration_ms`，间隔可指数退避
+- **着色自动判定**: 按 `NO_COLOR` → `TERM=dumb` → 输出目标是否为字符设备决定，重定向到文件或管道时自动关闭
 
 #### 🎨 Console 风格日志
 
@@ -93,32 +113,94 @@
 ### 企业级功能
 
 - **🔧 灵活配置**: Builder 模式链式调用，支持运行时动态配置
-- **⚙️ 多种写入器**: Console（内建异步批量管道）、File、Rotate、Buffered、Multi，全部采用 Options 模式
+- **⚙️ 多种写入器**: Console（异步双缓冲，并行写出零分配）、File、Rotate、Buffered、Multi，全部采用 Options 模式
 - **⚙️ 配置驱动创建**: `WriterConfig` + `CreateWriter` 支持通过配置统一创建 Writer
 - **🎯 错误处理**: 返回 error 的日志方法（`*Return` / `*CtxReturn` / `*KVReturn`），简化错误处理流程
 - **📊 统计分析**: `LoggerStats` 内置日志统计，`WriterStatsSnapshot` 收集写入器运行时指标
 - **🧪 完善测试**: 全面的测试覆盖与基准测试（`logger_benchmark_test.go`、`writer_benchmark_test.go`、`writer_console_async_test.go` 等）
 - **🔌 接口丰富**: 定义 `ILogger` / `IWriter` / `IAdapter` / `IManager` / `IFormatter` / `IHook` / `IMiddleware` 等接口，并兼容 Zap/Logrus/slog/Zerolog 框架接口
 
+## ⚠️ 重要默认值
+
+`NewLogger()` 的几个默认值会直接影响线上行为，接入前请先过一遍：
+
+| 默认值 | 行为 | 需要注意什么 |
+| --- | --- | --- |
+| **输出 = 共享 stdout 异步管道** | 日志写入双缓冲后由后台 goroutine 合并写出 | **优雅退出必须调 `logger.Flush()`**，否则最坏丢失最近 100ms 的日志 |
+| 格式 = `FormatJSON` | 结构化输出 | 需要人读格式用 `WithFormat(logger.FormatText)` |
+| 级别 = `DEBUG` | 全部放行 | 生产建议 `WithLevel(logger.INFO)` |
+| `showCaller` = true | 输出 `caller` / `callerfunc` | 每条约 +117 ns（成本是 `runtime.Callers` 栈回溯本身），不需要可关 |
+| **脱敏 = `SanitizeKeys`** | 按字段名擦除凭据、掩码 PII | 若字段名碰巧命中规则而内容并不敏感，用 `WithSanitize(logger.SanitizeOff)` 或改字段名 |
+| **行长上限 = 64KB** | 超限裁剪并补 `truncated` | 需要完整落盘超大字段时 `WithMaxLineBytes(0)` 关闭 |
+| 单字段上限 = 关闭 | 不限制 | 按业务需要 `WithMaxFieldBytes(n)` |
+| 着色 = 自动判定 | 终端开、重定向关 | `WithColorful(bool)` 显式指定后不再自动判定 |
+
+### 为什么默认输出是异步的
+
+裸 `os.Stdout` 没有缓冲，每条日志一次 `write(2)` 加一次互斥。实测（Apple M4，JSON + 2 对 KV、关 caller）：
+
+| 输出配置 | 串行 | 并行(10) |
+| --- | ---: | ---: |
+| `io.Discard`（纯格式化成本） | 68 ns | 20 ns |
+| 裸 `*os.File` → /dev/null | 429 ns | 674 ns |
+| 裸 `*os.File` → 真实文件 | 1239 ns | — |
+| **共享异步管道（默认）** | **125 ns** | **215 ns** |
+
+格式化只占 68 ns，而裸标准流要再付 360~1170 ns 的 syscall 与锁竞争——全链路 85~97% 的成本都在写出路径。所以默认值选异步，代价是需要在退出链路刷盘：
+
+```go
+func main() {
+ defer logger.Flush() // 刷净已入缓冲但未落盘的条目
+
+ log := logger.NewLogger().WithLevel(logger.INFO)
+ log.Info("应用启动")
+ // ...
+}
+```
+
+`FATAL` 路径由库在 `os.Exit` 前强制刷盘，遗言不会丢。`kill -9` 无法挽救（异步语义固有权衡）。
+
+需要逐条立即落盘（调试、与其他进程输出严格交错）时显式退回裸流——`WithOutput` 原样使用传入的 writer，不做任何包装：
+
+```go
+log := logger.NewLogger().WithOutput(os.Stdout) // 同步直写，无需 Flush
+```
+
 ## 🏗️ 项目结构
 
 ```
 go-logger/
-├── logger.go                  # 核心日志实现（基础/结构化/上下文/特殊/性能日志）
+├── logger.go                  # 核心日志实现（基础/结构化/上下文/特殊/性能日志、caller 定位、JSON 编码）
+├── fields.go                  # 子 Logger 的预编码字段存储与写出路径（WithField/WithFields）
 ├── types.go                   # 核心类型定义与 Builder 方法、全局 Logger
 ├── interfaces.go              # 接口定义（ILogger 及框架兼容接口）
 ├── level.go                   # 日志级别管理（26 种级别，6 个类别）
 ├── context.go                 # 上下文服务（OTel 链路追踪提取）
+├── sanitize.go                # 敏感字段脱敏（规则表 + 两级索引判定）
+├── scan.go                    # 值内容扫描（可选开启，手写单遍扫描）
+├── limit.go                   # 单条日志与单字段字节上限、超限裁剪
+├── escape.go                  # 文本模式控制字符转义（防日志注入，SWAR）
+├── identity.go                # 服务身份固定字段（service/instance/env）
+├── failure.go                 # 持续失败的限频汇总（FailureState/FailureLog）
+├── time.go                    # 时间戳快速路径（RFC3339Nano 秒级前缀缓存）
+├── value.go                   # 值格式化与显示宽度工具（零外部依赖）
+├── tty.go                     # 输出目标的着色能力探测（NO_COLOR / 字符设备）
 ├── console.go                 # Console 风格日志（分组/表格）
 ├── timer.go                   # 计时器实现（含自动清理）
-├── writer.go                  # 写入器实现（Console/File/Rotate/Buffered/Multi）
+├── writer.go                  # 写入器实现（Console 异步双缓冲 / File / Rotate / Buffered / Multi）
+├── stdout.go                  # 进程级共享的标准流异步输出器（默认输出）+ 包级 Flush/Close
 ├── output.go                  # 输出类型与配置（WriterConfig + CreateWriter）
 ├── empty.go                   # 空实现（EmptyLogger/EmptyAdapter/EmptyWriter/EmptyHook）
-├── *_test.go                  # 测试文件
-├── logger_benchmark_test.go   # 日志基准测试
+├── *_test.go                  # 测试文件（含 caller_shape_test.go 逐入口校验行号定位）
+├── logger_benchmark_test.go   # 日志与 caller 定位基准测试
+├── sanitize_benchmark_test.go # 脱敏判定与值扫描基准测试
+├── limit_benchmark_test.go    # 字节上限基准测试
 ├── writer_benchmark_test.go   # 写入器基准测试
 └── benchmark.sh               # 基准测试脚本
 ```
+
+跨库性能对比（go-logger / zap / zerolog / slog）在独立仓库
+[go-logger-benchmark](https://github.com/kamalyes/go-logger-benchmark) 维护。
 
 ## 📦 快速开始
 
@@ -234,12 +316,147 @@ func main() {
 log := logger.NewLogger().
  WithLevel(logger.INFO).
  WithShowCaller(true).
- WithColorful(true).
  WithPrefix("[MyApp]").
- WithFormat(logger.FormatJSON) // 支持 FormatText/FormatJSON/FormatXML/FormatCSV
+ WithFormat(logger.FormatJSON). // 支持 FormatText/FormatJSON/FormatXML/FormatCSV
+ WithService("order-svc").      // 身份字段，预编码一次
+ WithEnv("prod").
+ WithMaxLineBytes(64 * 1024) // 单条上限，0 表示不限制
 
 log.Info("配置完成")
 ```
+
+> 没有显式调用 `WithColorful` 时，着色随输出目标自动判定（终端开、重定向关）。
+> 显式调用后始终尊重调用方的选择。
+
+### 🛡️ 敏感字段脱敏
+
+默认按字段名脱敏，不读值内容——既不误伤业务正文，成本也不随消息长度增长：
+
+```go
+log.InfoKV("order created",
+ "order_id", "ORD-20260126-001",      // 业务主键，保留
+ "receiver_name", "张三",              // 自然人姓名，整体擦除
+ "receiver_phone", "13800138000",     // 号码掩码，保留末 4 位
+ "customer_email", "alice@example.com",
+ "access_token", "at_live_9f8e7d6c",  // 凭据，整体擦除
+ "status_code", 200)                  // 排障线索，保留
+```
+
+```json
+{"timestamp":"...","level":"INFO","message":"order created","order_id":"ORD-20260126-001","receiver_name":"[REDACTED]","receiver_phone":"***8000","customer_email":"a***@example.com","access_token":"[REDACTED]","status_code":200}
+```
+
+字段名的大小写与分隔符变体一视同仁：`accessToken`、`ACCESS-TOKEN`、`X-Api-Key`
+都会命中；后缀规则覆盖任意前缀，`wx_app_secret`、`user_password`、`cdn_signed_url` 同样生效。
+
+```go
+// 调整强度
+log.WithSanitize(logger.SanitizeOff)             // 关闭
+log.WithSanitize(logger.SanitizeKeys)            // 仅按字段名（默认）
+log.WithSanitize(logger.SanitizeKeysAndValues)   // 额外扫描 msg 与值的内容
+
+// 按业务补充敏感字段名（全进程生效，应在启动阶段调用完毕）
+logger.RegisterSensitiveKeys("my_voucher_code", "internal_ticket")
+```
+
+值扫描模式会额外处理正文里漏出的凭据与 PII：
+
+```go
+vlog := log.WithSanitize(logger.SanitizeKeysAndValues)
+vlog.InfoMsg("retry with Bearer eyJhbGciOiJIUzI1NiJ9 failed")
+// → "retry with Bearer [REDACTED] failed"
+vlog.InfoKV("cb", "note", "callback https://cdn.x.com/f?signature=abc to alice@example.com")
+// → "callback [REDACTED] to a***@example.com"
+```
+
+> 值扫描要逐条扫文本，且业务正文可能被误伤（如长订单号被当成号码），故不作为默认值。
+> 预过滤判据刻意收紧：`trace_id`、unix 时间戳、UUID 这类运维标识不会触发扫描。
+
+### 📏 单条体量上限
+
+```go
+log := logger.NewLogger().
+ WithMaxLineBytes(200).      // 整行上限
+ WithMaxFieldBytes(2048)     // 单字段上限（默认不限制）
+
+log.InfoKV("dump", "head", "keep-me", "payload", strings.Repeat("x", 500))
+```
+
+```json
+{"timestamp":"...","level":"INFO","message":"dump","head":"keep-me","truncated":true}
+```
+
+裁剪规则：骨架（时间戳、级别、消息、caller）最先写出故最后被牺牲；字段按调用方给出的
+顺序写出，**先写的字段先保住**——把根因与身份字段写在前面、大块 payload 写在后面即可。
+回滚一律落在完整字段的边界上，JSON 始终合法。
+
+### 📉 持续失败的限频汇总
+
+下游不可用时重试循环会打出完全相同的错误日志。一个 50ms 重试间隔的连接十分钟内就是
+12000 条同样的行，而它们携带的信息量和 1 条没有区别：
+
+```go
+fl := logger.NewFailureLog(log, logger.FailureLogConfig{
+ Interval:    time.Minute,      // 汇总间隔
+ MaxInterval: 10 * time.Minute, // 配置后间隔逐次翻倍，用于长时间卡死的依赖
+})
+
+for {
+ if err := dial(); err != nil {
+  // 首条立即出，之后每间隔一条带累计次数的汇总
+  fl.Fail(ctx, "upstream:dial", logger.ERROR, "dial upstream failed", "addr", addr)
+  time.Sleep(backoff(fl.Count("upstream:dial")))
+  continue
+ }
+ // 存在未恢复的失败时输出一条 INFO 并清除状态
+ fl.Recover(ctx, "upstream:dial", "upstream recovered")
+ break
+}
+```
+
+5000 次失败只输出 2 条（首条 + 恢复），汇总字段带上被压制的次数：
+
+```json
+{"level":"ERROR","message":"dial upstream failed","addr":"10.0.0.1:5432","failure_count":1,"suppressed_count":0,"failure_duration_ms":0}
+{"level":"INFO","message":"upstream recovered","failure_count":5000,"suppressed_count":4999,"failure_duration_ms":0}
+```
+
+长时间没有新失败的键会被摊销清理且不输出恢复日志，内存只随"正在失败的键数"增长。
+
+### 📍 服务身份字段
+
+```go
+log := logger.NewLogger().
+ WithService("order-svc").
+ WithInstance("").          // 传空串则按 INSTANCE_ID → POD_NAME → HOSTNAME → 主机名推导
+ WithEnv("prod")
+
+log.InfoKV("started", "port", 8080)
+```
+
+```json
+{"timestamp":"...","level":"INFO","service":"order-svc","instance":"order-svc-7d9f-abcde","env":"prod","message":"started","port":8080}
+```
+
+三个字段在设置时预编码成片段，每条日志只做一次 memcpy，常驻字段不带来逐条编码成本。
+身份字段紧随 `level` 输出，位置固定便于下游按列解析。
+
+### 🔗 子 Logger（常驻字段）
+
+```go
+reqLog := log.WithField("request_id", "rq_0f8e7d6c").WithField("org_id", "o_1001")
+reqLog.InfoMsg("handling request")
+reqLog.InfoKV("done", "status", 200)
+```
+
+```json
+{"timestamp":"...","level":"INFO","message":"handling request","request_id":"rq_0f8e7d6c","org_id":"o_1001"}
+{"timestamp":"...","level":"INFO","message":"done","request_id":"rq_0f8e7d6c","org_id":"o_1001","status":200}
+```
+
+字段在 `WithField` 时一次性预编码，之后每条日志只做一次 memcpy——**稳态成本与字段数无关**
+（2 / 4 / 8 个常驻字段均约 100 ns）。字段按键排序，同一个子 Logger 的输出顺序稳定可比对；
+同名键覆盖原位而非产生重复键。优先级为 **单条 KV > 子 Logger 固定字段 > ctx 提取字段**。
 
 ### 分布式追踪（OpenTelemetry 集成）
 
@@ -505,11 +722,15 @@ func validateInput(data map[string]interface{}) error {
 所有写入器均采用 **Options 函数式选项模式**构造：
 
 ```go
-// 控制台写入器
+// 控制台写入器（异步双缓冲：生产者只做一次 memcpy，后台 goroutine 在锁外合并写出）
 consoleWriter := logger.NewConsoleWriter(
  logger.WithConsoleOutput(os.Stdout),
  logger.WithConsoleColor(true),
+ logger.WithConsoleBatchBytes(64*1024),             // 活动缓冲达到此体量即唤醒后台写出
+ logger.WithConsoleQueueSize(512*1024),             // 待写缓冲硬上限（字节），超过即同步直写形成背压
+ logger.WithConsoleFlushInterval(100*time.Millisecond), // 定时刷写间隔
 )
+defer consoleWriter.Close() // 刷净缓冲并停止后台 goroutine
 
 // 文件写入器
 fileWriter := logger.NewFileWriter(
@@ -619,7 +840,94 @@ logger.SetGlobalShowCaller(false)
 
 ### Logger Builder 方法
 
-`WithLevel` `WithShowCaller` `WithPrefix` `WithColorful` `WithOutput` `WithTimeFormat` `WithFormat` `WithCallerDepth` `WithShowStacktrace` `WithTimestampKey` `WithLevelKey` `WithMessageKey` `WithCallerKey` `WithStacktraceKey` `WithFormatter` `WithWriters` `WithHooks` `WithMiddleware` `WithContextExtractor` `WithContextKeys`
+| 类别 | 方法 |
+| --- | --- |
+| **基础** | `WithLevel` `WithShowCaller` `WithPrefix` `WithColorful` `WithOutput` `WithTimeFormat` `WithFormat` `WithCallerDepth` `WithShowStacktrace` |
+| **字段名** | `WithTimestampKey` `WithLevelKey` `WithMessageKey` `WithCallerKey` `WithStacktraceKey` |
+| **安全与体量** | `WithSanitize` `WithMaxLineBytes` `WithMaxFieldBytes` |
+| **服务身份** | `WithService` `WithInstance` `WithEnv` |
+| **上下文** | `WithContextExtractor` `WithContextKeys` |
+| **扩展** | `WithFormatter` `WithWriters` `WithHooks` `WithMiddleware` |
+
+### 包级函数
+
+| 类别 | 函数 |
+| --- | --- |
+| **构造** | `NewLogger` `New` `GetGlobalLogger` `NewEmptyLogger` `NewEmptyLoggerWithLevel` |
+| **刷盘与关闭** | `Flush` `Close`（共享标准流输出器；优雅退出链路必调 `Flush`） |
+| **共享输出器** | `DefaultOutput` `StderrOutput` |
+| **写入器** | `NewConsoleWriter` `NewFileWriter` `NewRotateWriter` `NewBufferedWriter` `NewMultiWriter` `CreateWriter` |
+| **全局配置** | `SetGlobalLevel` `SetGlobalShowCaller` |
+| **脱敏** | `RegisterSensitiveKeys` |
+| **身份** | `DetectInstance` |
+| **失败汇总** | `NewFailureLog` |
+| **链路追踪** | `ExtractTraceID` `ContextWithTraceID` `InjectTraceToOutgoing` `ExtractTraceFromIncoming` `RestoreTraceFromIncoming` |
+| **级别** | `ParseLevel` `GetAllLevels` `GetBasicLevels` `GetExtendedLevels` `GetLevelsByCategory` `GetLevelNames` `GetAllCategories` |
+| **计时器** | `NewTimer` `NewConsoleGroup` `SetTimerMaxAge` `SetTimerCleanupInterval` `CleanupExpiredTimers` `GetActiveTimersCount` |
+
+### 关键常量与类型
+
+| 名称 | 说明 |
+| --- | --- |
+| `SanitizeOff` / `SanitizeKeys` / `SanitizeKeysAndValues` | 脱敏强度，默认 `SanitizeKeys` |
+| `DefaultMaxLineBytes` | 单条日志默认字节上限（64KB） |
+| `FormatText` / `FormatJSON` / `FormatXML` / `FormatCSV` | 输出格式 |
+| `FieldService` / `FieldInstance` / `FieldEnv` | 身份字段名 |
+| `FieldFailureCount` / `FieldSuppressedCount` / `FieldFailureDurationMS` | 失败汇总字段名 |
+| `FailureState` / `FailureLog` / `FailureLogConfig` | 失败限频汇总 |
+| `DefaultFailureInterval` | 汇总间隔默认值（1 分钟） |
+
+## 📊 性能
+
+实测环境：Apple M4 / Go 1.26.2 / `-cpu=10`。格式化类数据输出到 `io.Discard`，
+脱敏与行长上限关闭（这两项是 zap / zerolog / slog 都不具备的能力，开着就不是同工作量比较）。
+
+### 格式化路径
+
+| 场景 | ns/op | allocs/op |
+| --- | ---: | ---: |
+| 级别短路（WARN 阈值下打 Debug） | 2 | 0 |
+| 纯消息 | 59 | 0 |
+| JSON + 5 对 KV | 108 | 0 |
+| JSON + 5 对 KV + caller | 229 | 0 |
+| 子 Logger 稳态（2 / 4 / 8 个常驻字段） | 约 100 | 0 |
+| 子 Logger 构造 1 字段 + 打一条 | 141 | 1 |
+
+### 能力开启的代价
+
+| 能力 | 代价 |
+| --- | --- |
+| 脱敏 `SanitizeKeys` | 约 +10 ns/字段（字段名判定 8.4 ns，零分配） |
+| 行长上限 | 约 +7 ns/条 |
+| 服务身份字段 | 约 0（预编码片段，一次 memcpy） |
+| caller 定位 | 约 +117 ns（成本是 `runtime.Callers` 栈回溯本身，与帧数线性相关） |
+
+行长上限在失控大字段上的收益明显——200KB payload：关闭 26861 ns/op、217224 B/op，
+开启 8943 ns/op、69722 B/op。
+
+### 输出路径
+
+| 输出配置 | 串行 | 并行(10) |
+| --- | ---: | ---: |
+| `ConsoleWriter`（异步双缓冲，默认） | 24 ns | 110 ns |
+| 裸 `*os.File` | 429 ns | 674 ns |
+
+### 跨库对比
+
+四库对比（含输出目标、子 Logger、类型化值、text 格式、大字段等 17 个场景）在
+[go-logger-benchmark](https://github.com/kamalyes/go-logger-benchmark) 维护并由 CI 自动生成。
+
+> 一个值得强调的结论：`io.Discard` 基线只能测出格式化成本，而生产里 85~97% 的单条成本
+> 在写出路径上。实测直写真实文件时四库差距从 `io.Discard` 下的 3~5 倍收敛到 1.4 倍以内
+> ——**只看 `io.Discard` 的数字去选库或调优，会把全部精力投在不到 15% 的那段上**。
+
+### 本地复现
+
+```sh
+go test -run='^$' -bench='.' -benchtime=2s -count=3 -cpu=10 .
+```
+
+> 单次 `-benchtime=1s` 在大 suite 里有 ±25% 噪声，判断回归请用 `-count=3`。
 
 ## 🤝 社区贡献
 
@@ -671,7 +979,16 @@ git push origin feature/your-amazing-feature
 - 新功能必须有对应的测试套件
 - 测试覆盖率不得低于当前水平
 - 包含性能基准测试（如适用，可参考 `benchmark.sh`）
-- 验证并发安全性
+- 并发相关改动必须跑 `go test -race ./...`
+
+有几类改动的失败是静默的（输出看起来正常、不报任何错），对应的回归测试请一并补上：
+
+| 改动类型 | 必须验证 |
+| --- | --- |
+| 调用链上下结构（影响 caller 定位） | `go test -run='TestCallerShape' -v` —— 逐个公开入口校验上报的行号。栈回溯窗口若装不下用户帧会静默退化到全量回退，成本翻倍而输出仍然正确 |
+| 任何截断 / 裁剪路径 | 多个不同上限下输出仍是合法 JSON；`truncated` 标记存在；多字节字符不被切断 |
+| 脱敏规则表 | 双向断言——凭据确实被擦除，**且**运维字段（`status_code` / `ip_address` / `cache_key` / `trace_id`）确实保留。过度脱敏不报错，只是让日志失去排障价值 |
+| 文本模式输出 | 一条日志恒为一行（控制字符已转义）；花括号配平 |
 
 ## ⭐ Star 历史
 
