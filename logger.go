@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-11-09 09:42:37
+ * @LastEditTime: 2026-10-02 11:06:28
  * @FilePath: \go-logger\logger.go
  * @Description: 统一的日志工具包，支持 emoji 和结构化日志
  *
@@ -163,7 +163,7 @@ func New() *Logger {
 // appendTextHeader 将时间戳、前缀、级别前缀、调用者信息追加到 buf
 // 供带 fields/KV 的文本模式条目构建器共享，避免重复代码
 // 注意：此函数成本较高无法内联，故 ultraLog 的纯文本路径保留内联实现以减少调用开销
-func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
+func (l *Logger) appendTextHeader(buf []byte, level LogLevel, ci *callerInfo) []byte {
 	// 添加时间戳
 	buf = l.appendTimestamp(buf)
 
@@ -183,18 +183,27 @@ func (l *Logger) appendTextHeader(buf []byte, level LogLevel) []byte {
 	buf = append(buf, l.identityText...)
 
 	// 添加调用者信息（如果需要）
+	// ci 为调用方在入口邻接层浅层定位的结果；nil 时在本层自解析兜底
 	if l.showCaller.Load() {
-		if ci := l.findExternalCaller(3, 6); ci != nil {
-			buf = append(buf, '[')
-			buf = append(buf, ci.file...)
-			buf = append(buf, ':')
-			buf = strconv.AppendInt(buf, int64(ci.line), 10)
-			buf = append(buf, ':')
-			buf = append(buf, ci.funcName...)
-			buf = append(buf, ']', ' ')
+		if ci == nil {
+			ci = l.findExternalCaller(3, 6)
+		}
+		if ci != nil {
+			buf = appendCallerText(buf, ci)
 		}
 	}
 	return buf
+}
+
+// appendCallerText 追加文本模式的调用者段 [file:line:func]
+func appendCallerText(buf []byte, ci *callerInfo) []byte {
+	buf = append(buf, '[')
+	buf = append(buf, ci.file...)
+	buf = append(buf, ':')
+	buf = strconv.AppendInt(buf, int64(ci.line), 10)
+	buf = append(buf, ':')
+	buf = append(buf, ci.funcName...)
+	return append(buf, ']', ' ')
 }
 
 // writeOut 将完整条目缓冲区写出并处理 FATAL 退出（所有日志方法的唯一出口）
@@ -235,51 +244,35 @@ func (l *Logger) writeTextBuf(level LogLevel, buf []byte) {
 
 // ultraLog 极致优化的日志方法（使用字节池和零拷贝）
 // 纯文本路径保留内联实现以避免 appendTextHeader 无法内联带来的额外调用开销
-func (l *Logger) ultraLog(level LogLevel, msg string) {
+func (l *Logger) ultraLog(level LogLevel, msg string, ci *callerInfo) {
 	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
-	// JSON 格式走专用路径，输出结构化 JSON（无额外 fields）
-	if l.format == FormatJSON {
-		l.writeJSONEntry(level, msg, nil)
-		return
+	// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖
+	//
+	// 此前 JSON 分支经 writeJSONEntry 转交 appendJSONHeader 在 (3,5) 自解析、
+	// 文本分支在 (3,6) 自解析，两者都比实际需要多取 2~4 帧。而 runtime.Callers
+	// 的成本随帧数线性增长（实测 1 帧 62 ns、3 帧 101 ns、6 帧 131 ns），
+	// 于是 InfoMsg 带 caller 反而比字段更多的 InfoKV 还慢（304 ns vs 246 ns）
+	if ci == nil && l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
 	}
 
-	// 文本路径：内联构建完整条目
 	p := bytePool.Get().(*[]byte)
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-	// 添加时间戳
-	buf = l.appendTimestamp(buf)
-
-	// 时间戳分隔符（与 appendTextHeader 保持一致）
-	buf = append(buf, ' ')
-
-	// 添加前缀（如果有）
-	if l.prefix != "" {
-		buf = append(buf, l.prefix...)
+	// JSON 格式走专用路径，输出结构化 JSON（无额外 fields）
+	if l.format == FormatJSON {
+		buf = append(buf, '{')
+		buf = l.appendJSONHeader(buf, level, msg, ci)
+		l.writeJSONTail(level, buf)
+		return
 	}
 
-	// 添加级别前缀
-	buf = append(buf, l.getLevelPrefix(level)...)
-
-	// 服务身份（预编码片段）
-	buf = append(buf, l.identityText...)
-
-	// 添加调用者信息（如果需要）
-	if l.showCaller.Load() {
-		if ci := l.findExternalCaller(3, 6); ci != nil {
-			buf = append(buf, '[')
-			buf = append(buf, ci.file...)
-			buf = append(buf, ':')
-			buf = strconv.AppendInt(buf, int64(ci.line), 10)
-			buf = append(buf, ':')
-			buf = append(buf, ci.funcName...)
-			buf = append(buf, ']', ' ')
-		}
-	}
+	// 文本路径：内联构建完整条目
+	buf = l.appendTextHeader(buf, level, ci)
 
 	// 添加消息
 	buf = l.appendSanitizedMessage(buf, msg, false)
@@ -394,7 +387,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 
 	// text 模式：无 fields 时直接走纯文本路径
 	if len(fields) == 0 {
-		l.ultraLog(level, msg)
+		l.ultraLog(level, msg, nil)
 		return
 	}
 
@@ -402,7 +395,7 @@ func (l *Logger) ultraLogWithFields(level LogLevel, msg string, fields map[strin
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, nil)
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
@@ -450,17 +443,22 @@ func (l *Logger) extractContextFields(ctx context.Context) map[string]any {
 	return extractContextFieldsWithCompiledKeys(ctx, l.contextKeys)
 }
 
-// appendJSONKey 追加 JSON 键（假设 key 是简单 ASCII 字符串，无需转义）
-// 仅用于动态键（KV 参数、fields map）；Logger 固定键为预构建片段，单次 append 拷贝
+// appendJSONKey 追加 JSON 键（带转义）
+//
+// 键同样必须转义：含双引号或控制字符的键会直接产出非法 JSON，
+// 而一条非法行可能让下游解析器丢掉整个批次。曾因假设"键都是简单 ASCII"
+// 而不转义，InfoKV("m", `bad"key`, v) 即产出 {"bad"key":"v"} 这种无法解析的行
+//
+// 转义走 SWAR 快速路径：干净的短键只需一次 64 位运算，代价可忽略
 func appendJSONKey(buf []byte, key string) []byte {
 	buf = append(buf, '"')
-	buf = append(buf, key...)
+	buf = appendJSONStringContent(buf, key)
 	buf = append(buf, '"', ':')
 	return buf
 }
 
 // keyJSONFragment 预构建键的 JSON 片段（"key": 形式，leadingComma 为 true 时含前导逗号）
-// 与 appendJSONKey 字节输出完全一致（键不做转义），固定键在设置时构建一次，热路径省去 3 次 append 合并为 1 次；
+// 与 appendJSONKey 字节输出完全一致（同样转义），固定键在设置时构建一次，热路径省去 3 次 append 合并为 1 次；
 // 非首字段的键片段携带前导逗号，进一步省去条目骨架构建时逐字段的单字节逗号 append
 // （timestamp 为条目首字段紧随 '{'，不携带逗号）
 func keyJSONFragment(key string, leadingComma bool) []byte {
@@ -469,7 +467,7 @@ func keyJSONFragment(key string, leadingComma bool) []byte {
 		b = append(b, ',')
 	}
 	b = append(b, '"')
-	b = append(b, key...)
+	b = appendJSONStringContent(b, key)
 	b = append(b, '"', ':')
 	return b
 }
@@ -875,11 +873,15 @@ func (l *Logger) logWithContextFormat(ctx context.Context, level LogLevel, forma
 		l.logWithContextJSON(ctx, level, msg)
 		return
 	}
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
 	contextInfo := l.extractContextInfo(ctx)
 	if contextInfo != "" {
 		msg = contextInfo + msg
 	}
-	l.ultraLog(level, msg)
+	l.ultraLog(level, msg, ci)
 }
 
 // logWithContextJSON JSON 模式下带 context 的直写条目
@@ -903,15 +905,22 @@ func (l *Logger) ultraLogf(level LogLevel, format string, args ...any) {
 		return
 	}
 
+	// caller 在本层解析：本帧之上恰为 [入口API, 用户]，(2,3) 精确覆盖。
+	// 若交由 ultraLog 解析，其窗口里会多出本层这一帧而装不下用户帧，
+	// 进而触发 12 帧全量回退——实测 Info 带 caller 会从 352 ns 退化到 883 ns
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
+
 	// 快速路径：无参数格式化
 	if len(args) == 0 {
-		l.ultraLog(level, format)
+		l.ultraLog(level, format, ci)
 		return
 	}
 
 	// 有参数时才进行格式化
-	msg := fmt.Sprintf(format, args...)
-	l.ultraLog(level, msg)
+	l.ultraLog(level, fmt.Sprintf(format, args...), ci)
 }
 
 // log 记录日志 - 使用 ultraLogf 提升性能
@@ -1021,32 +1030,32 @@ func (l *Logger) DebugMsg(msg string) {
 	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
-	l.ultraLog(DEBUG, msg)
+	l.ultraLog(DEBUG, msg, nil)
 }
 
 func (l *Logger) InfoMsg(msg string) {
 	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
-	l.ultraLog(INFO, msg)
+	l.ultraLog(INFO, msg, nil)
 }
 
 func (l *Logger) WarnMsg(msg string) {
 	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
-	l.ultraLog(WARN, msg)
+	l.ultraLog(WARN, msg, nil)
 }
 
 func (l *Logger) ErrorMsg(msg string) {
 	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
-	l.ultraLog(ERROR, msg)
+	l.ultraLog(ERROR, msg, nil)
 }
 
 func (l *Logger) FatalMsg(msg string) {
-	l.ultraLog(FATAL, msg)
+	l.ultraLog(FATAL, msg, nil)
 }
 
 // 多行日志方法 - 自动处理换行符
@@ -1055,7 +1064,7 @@ func (l *Logger) InfoLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		l.ultraLog(INFO, line)
+		l.ultraLog(INFO, line, nil)
 	}
 }
 
@@ -1064,7 +1073,7 @@ func (l *Logger) ErrorLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		l.ultraLog(ERROR, line)
+		l.ultraLog(ERROR, line, nil)
 	}
 }
 
@@ -1073,7 +1082,7 @@ func (l *Logger) WarnLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		l.ultraLog(WARN, line)
+		l.ultraLog(WARN, line, nil)
 	}
 }
 
@@ -1082,7 +1091,7 @@ func (l *Logger) DebugLines(lines ...string) {
 		return
 	}
 	for _, line := range lines {
-		l.ultraLog(DEBUG, line)
+		l.ultraLog(DEBUG, line, nil)
 	}
 }
 
@@ -1097,13 +1106,17 @@ func (l *Logger) logWithContextLines(ctx context.Context, level LogLevel, lines 
 		}
 		return
 	}
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
 	contextInfo := l.extractContextInfo(ctx)
 	for _, line := range lines {
 		msg := line
 		if contextInfo != "" {
 			msg = contextInfo + line
 		}
-		l.ultraLog(level, msg)
+		l.ultraLog(level, msg, ci)
 	}
 }
 
@@ -1176,8 +1189,15 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		return
 	}
 
+	// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
+	// 提到分支之前共用——空 KV 分支若交由 ultraLog 解析，其窗口会多出本层一帧而落空
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
+
 	if len(keysAndValues) == 0 {
-		l.ultraLog(level, msg)
+		l.ultraLog(level, msg, ci)
 		return
 	}
 
@@ -1195,13 +1215,6 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 		buf := (*p)[:0]
 		defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-		// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
-		// 较头部层 (3,6) 自解析少回溯约一半物理帧；未命中时头部层兜底
-		var ci *callerInfo
-		if l.showCaller.Load() {
-			ci = l.findExternalCaller(2, 3)
-		}
-
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = l.appendKVPairsJSON(buf, keysAndValues)
@@ -1214,7 +1227,7 @@ func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, ci)
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
@@ -1323,7 +1336,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	}
 
 	if len(fields) == 0 {
-		l.ultraLog(level, msg)
+		l.ultraLog(level, msg, nil)
 		return
 	}
 
@@ -1332,7 +1345,7 @@ func (l *Logger) logWithFields(level LogLevel, msg string, fields map[string]any
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, nil)
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
@@ -1507,7 +1520,7 @@ func (l *Logger) Log(level LogLevel, msg string) {
 	if level < LogLevel(l.level.Load()) {
 		return
 	}
-	l.ultraLog(level, msg)
+	l.ultraLog(level, msg, nil)
 }
 
 func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
@@ -1523,7 +1536,7 @@ func (l *Logger) LogContext(ctx context.Context, level LogLevel, msg string) {
 	if contextInfo != "" {
 		msg = contextInfo + msg
 	}
-	l.ultraLog(level, msg)
+	l.ultraLog(level, msg, nil)
 }
 
 func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
@@ -2125,7 +2138,7 @@ func (f *fieldLogger) WithContext(ctx context.Context) ILogger {
 // Clone 克隆当前Logger
 // fields 与 preJSON 构造后即不可变，故新实例直接共享，无需深拷贝
 func (f *fieldLogger) Clone() ILogger {
-	return &fieldLogger{logger: f.logger, fields: f.fields, preJSON: f.preJSON}
+	return &fieldLogger{logger: f.logger, fields: f.fields, preJSON: f.preJSON, preTruncated: f.preTruncated}
 }
 
 // 兼容标准log包的方法
@@ -2313,7 +2326,7 @@ func (l *Logger) logSpecialInternal(level LogLevel, emoji, name, format string, 
 	p := bytePool.Get().(*[]byte)
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, nil)
 	buf = append(buf, msgBuf...)
 	l.writeTextBuf(level, buf)
 }
@@ -2528,7 +2541,7 @@ func (l *Logger) LogSpecialContext(ctx context.Context, logType SpecialLogType, 
 	p := bytePool.Get().(*[]byte)
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, nil)
 	if contextInfo := l.extractContextInfo(ctx); contextInfo != "" {
 		buf = append(buf, contextInfo...)
 	}

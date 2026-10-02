@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2026-01-26 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-01-26 00:00:00
+ * @LastEditTime: 2026-10-02 11:06:28
  * @FilePath: \go-logger\limit_test.go
  * @Description: 单条日志字节上限与超限裁剪测试
  *
@@ -186,5 +186,78 @@ func TestLimit_TextMode(t *testing.T) {
 	}
 	if strings.Count(out, "\n") != 1 {
 		t.Errorf("裁剪后仍须恰为一行，实得 %d 个换行", strings.Count(out, "\n"))
+	}
+}
+
+// TestLimit_PreEncodedFieldsCapped 子 Logger 的固定字段同样受整行上限约束
+//
+// 回归点：preJSON 此前完全绕过上限——写出路径的字段循环只约束它自己追加的部分，
+// 管不到已经拼好的预编码片段，于是一个 200KB 的固定字段会让每条日志都写出 204KB
+func TestLimit_PreEncodedFieldsCapped(t *testing.T) {
+	var buf bytes.Buffer
+	l := jsonFieldLogger(&buf)
+
+	l.WithField("payload", strings.Repeat("x", 200*1024)).InfoMsg("msg")
+
+	if got := buf.Len(); got > DefaultMaxLineBytes {
+		t.Fatalf("预编码字段未受上限约束：写出 %d 字节", got)
+	}
+	line := lastLine(t, &buf)
+	var m map[string]any
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		t.Fatalf("输出非合法 JSON: %v", err)
+	}
+	// 截断后至少保住键名与值的前缀，不应把整个字段丢掉
+	payload, ok := m["payload"].(string)
+	if !ok || len(payload) < 1024 {
+		t.Errorf("截断应保住值的前缀，实得 %d 字节", len(payload))
+	}
+	if m["truncated"] != true {
+		t.Errorf("应补 truncated 标记，实得 %#v", m["truncated"])
+	}
+}
+
+// TestLimit_TextRollbackBalancesBraces text 回滚路径的花括号必须配平
+// 回滚发生在字段循环内部，此时 kvBraceClose 尚未追加
+func TestLimit_TextRollbackBalancesBraces(t *testing.T) {
+	var buf bytes.Buffer
+	l := NewLogger().WithOutput(&buf).WithFormat(FormatText).
+		WithColorful(false).WithShowCaller(false).
+		WithMaxLineBytes(120).WithMaxFieldBytes(500)
+
+	l.InfoKV("dump", "a", strings.Repeat("1", 200), "b", strings.Repeat("2", 200))
+
+	out := strings.TrimSpace(buf.String())
+	if open, close := strings.Count(out, "{"), strings.Count(out, "}"); open != close {
+		t.Fatalf("花括号不配平：开 %d 闭 %d\n原文: %s", open, close, out)
+	}
+}
+
+// TestJSONKey_Escaped 动态键必须转义，否则直接产出非法 JSON
+// 回归点：曾假设"键都是简单 ASCII"而不转义，含引号的键即产出无法解析的行，
+// 一条非法行可能让下游解析器丢掉整个批次
+func TestJSONKey_Escaped(t *testing.T) {
+	cases := []struct {
+		name string
+		log  func(*Logger)
+	}{
+		{"KV 键含引号", func(l *Logger) { l.InfoKV("m", `bad"key`, "v") }},
+		{"KV 键含换行", func(l *Logger) { l.InfoKV("m", "bad\nkey", "v") }},
+		{"KV 键含反斜杠", func(l *Logger) { l.InfoKV("m", `bad\key`, "v") }},
+		{"预编码键含引号", func(l *Logger) { l.WithField(`bad"key`, "v").InfoMsg("m") }},
+		{"fields 键含引号", func(l *Logger) { l.InfoWithFields("m", map[string]any{`bad"key`: "v"}) }},
+		{"自定义字段名含引号", func(l *Logger) { l.WithMessageKey(`bad"msg`).InfoMsg("m") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			c.log(jsonFieldLogger(&buf))
+
+			line := lastLine(t, &buf)
+			var m map[string]any
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatalf("输出非合法 JSON: %v\n原文: %s", err, line)
+			}
+		})
 	}
 }

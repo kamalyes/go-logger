@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-11-07 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2026-07-29 10:38:52
+ * @LastEditTime: 2026-10-02 11:06:28
  * @FilePath: \go-logger\logger_benchmark_test.go
  * @Description: 日志性能基准测试
  *
@@ -13,6 +13,7 @@ package logger
 import (
 	"context"
 	"io"
+	"runtime"
 	"testing"
 
 	"google.golang.org/grpc/metadata"
@@ -175,5 +176,81 @@ func BenchmarkJSON_WithFields(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		l.WithField("request_id", "abc-123").WithField("user_id", 42).Info("处理完成")
+	}
+}
+
+// ==================== caller 定位成本 ====================
+//
+// runtime.Callers 的成本随请求帧数线性增长，而库内的 PC 缓存查询只占几纳秒。
+// 这组基准守住"各入口邻接层浅层定位"的收益：一旦某条路径的帧布局变化导致
+// 窗口装不下用户帧，就会退化到 12 帧全量回退，成本翻倍且无任何报错
+
+// benchRuntimeCallers 测量 runtime.Callers 在给定帧数下的裸成本
+func benchRuntimeCallers(b *testing.B, frames int) {
+	var pcs [16]uintptr
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = runtime.Callers(2, pcs[:frames])
+	}
+}
+
+func BenchmarkCaller_RuntimeCallers1(b *testing.B)  { benchRuntimeCallers(b, 1) }
+func BenchmarkCaller_RuntimeCallers3(b *testing.B)  { benchRuntimeCallers(b, 3) }
+func BenchmarkCaller_RuntimeCallers6(b *testing.B)  { benchRuntimeCallers(b, 6) }
+func BenchmarkCaller_RuntimeCallers12(b *testing.B) { benchRuntimeCallers(b, 12) }
+
+// BenchmarkCaller_CacheLoad PC 缓存命中的成本（相对栈回溯可忽略）
+func BenchmarkCaller_CacheLoad(b *testing.B) {
+	var pcs [4]uintptr
+	runtime.Callers(2, pcs[:1])
+	callerCache.Store(pcs[0], &callerInfo{file: "bench.go"})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = callerCache.Load(pcs[0])
+	}
+}
+
+// BenchmarkCaller_Shallow 入口邻接层的浅层定位（3 帧窗口）
+func BenchmarkCaller_Shallow(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.findExternalCaller(2, 3)
+	}
+}
+
+// BenchmarkCaller_Deep 头部层的兜底定位（6 帧窗口）
+func BenchmarkCaller_Deep(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.findExternalCaller(3, 6)
+	}
+}
+
+// BenchmarkCaller_MsgEntry 纯消息入口：帧布局 [ultraLog, InfoMsg, 用户]
+func BenchmarkCaller_MsgEntry(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.InfoMsg("req done")
+	}
+}
+
+// BenchmarkCaller_FormatEntry 格式化入口：多一层 ultraLogf
+func BenchmarkCaller_FormatEntry(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("req done")
+	}
+}
+
+// BenchmarkCaller_KVEntry KV 入口：帧布局 [logWithKV, InfoKV, 用户]
+func BenchmarkCaller_KVEntry(b *testing.B) {
+	l := benchLogger(FormatJSON, true)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.InfoKV("req done", "uid", 10086, "region", "cn")
 	}
 }

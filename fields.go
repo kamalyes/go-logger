@@ -2,7 +2,7 @@
  * @Author: kamalyes 501893067@qq.com
  * @Date: 2025-08-26 00:00:00
  * @LastEditors: kamalyes 501893067@qq.com
- * @LastEditTime: 2025-08-26 01:00:06
+ * @LastEditTime: 2026-10-02 11:06:28
  * @FilePath: \go-logger\fields.go
  * @Description: 字段 Logger 的预编码字段存储与写出路径
  *
@@ -47,6 +47,8 @@ type fieldLogger struct {
 	fields []logField
 	// preJSON 预编码的 JSON 片段（形如 `,"k":v,"k2":v2`），构造时编码一次
 	preJSON []byte
+	// preTruncated 标记预编码片段因超出预算被裁剪过，写出时需补 truncated 标记
+	preTruncated bool
 
 	// 内联存储：字段数 ≤ inlineFieldCap、预编码片段 ≤ inlineJSONCap 时，
 	// fields 与 preJSON 直接落在本结构体内，整个子 Logger 只需一次堆分配
@@ -126,7 +128,11 @@ func newFieldLoggerAdd(l *Logger, parent *fieldLogger, key string, value any) *f
 	if parent != nil {
 		pre = append(pre, parent.preJSON...)
 	}
-	f.preJSON = l.appendFieldJSON(pre, key, value)
+	var trimmed bool
+	f.preJSON, trimmed = l.appendFieldJSON(pre, key, value)
+	// 父片段若已被裁剪，标记必须继承下去，否则子 Logger 的日志不再提示已裁剪
+	f.preTruncated = trimmed || (parent != nil && parent.preTruncated)
+	f.capPreJSON(len(pre))
 	return f
 }
 
@@ -138,9 +144,35 @@ func (f *fieldLogger) encodePreJSON() {
 		pre = make([]byte, 0, est)
 	}
 	for i := range f.fields {
-		pre = f.logger.appendFieldJSON(pre, f.fields[i].key, f.fields[i].value)
+		mark := len(pre)
+		var trimmed bool
+		pre, trimmed = f.logger.appendFieldJSON(pre, f.fields[i].key, f.fields[i].value)
+		f.preTruncated = f.preTruncated || trimmed
+		if f.logger.overPreJSONBudget(pre) {
+			pre = pre[:mark]
+			f.preTruncated = true
+			break
+		}
 	}
 	f.preJSON = pre
+}
+
+// capPreJSON 单字段追加后的上限兜底：超限则回滚到 mark 并标记已裁剪
+// mark 必须是上一个完整字段结束的位置，从字段中间切断会让 JSON 不合法
+func (f *fieldLogger) capPreJSON(mark int) {
+	if f.logger.overPreJSONBudget(f.preJSON) {
+		f.preJSON = f.preJSON[:mark]
+		f.preTruncated = true
+	}
+}
+
+// overPreJSONBudget 报告预编码片段是否已超出其可占用的预算
+//
+// 固定字段每条日志都要写出，故只允许占用整行上限的一半，给骨架与单条 KV 留出空间
+// 不设此上限时一个超大的固定字段可以让每条日志都突破整行上限——写出路径的
+// 字段循环只约束它自己追加的部分，管不到已经拼好的 preJSON
+func (l *Logger) overPreJSONBudget(pre []byte) bool {
+	return l.maxLineBytes > 0 && len(pre) > l.maxLineBytes/2
 }
 
 // estimatedFieldJSONSize 预估预编码片段容量，使 preJSON 构建只需一次分配
@@ -160,10 +192,22 @@ func estimatedFieldJSONSize(fields []logField) int {
 //
 // 脱敏在此处完成：固定字段每个子 Logger 只编码一次，因此按字段名判定的成本
 // 被摊进构造阶段，之后每条日志都是现成的脱敏结果，热路径零额外开销
-func (l *Logger) appendFieldJSON(buf []byte, key string, value any) []byte {
+func (l *Logger) appendFieldJSON(buf []byte, key string, value any) ([]byte, bool) {
 	buf = append(buf, ',')
 	buf = appendJSONKey(buf, key)
-	return l.appendSanitizedJSONValue(buf, key, value)
+	if l.maxLineBytes > 0 {
+		// 先截断再编码：直接编码再回滚会白付一次大块分配，且整个字段都会被丢掉，
+		// 而截断后至少保住键名与值的前缀。
+		// 余量要同时扣掉两个引号与截断标记，否则编码结果仍会越过预算，
+		// 随后被 capPreJSON 整条回滚，截断等于没做
+		room := l.maxLineBytes/2 - len(buf) - len(truncatedValueMark) - 2
+		if clamped, trimmed := l.clampValue(value, room); trimmed {
+			if text, ok := clamped.(string); ok {
+				return appendCappedJSONString(buf, text, true), true
+			}
+		}
+	}
+	return l.appendSanitizedJSONValue(buf, key, value), false
 }
 
 // fieldsFromMap 把 map 转为有序字段列表（按键排序，保证输出稳定）
@@ -241,26 +285,30 @@ func (l *Logger) logPreFieldsKV(level LogLevel, msg string, f *fieldLogger, kv [
 		return
 	}
 
+	// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
+	// 提到分支之前共用，两种格式与空字段分支都用同一份结果
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
+
 	if l.format == FormatJSON {
 		p := bytePool.Get().(*[]byte)
 		buf := (*p)[:0]
 		defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-		// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧
-		var ci *callerInfo
-		if l.showCaller.Load() {
-			ci = l.findExternalCaller(2, 3)
-		}
-
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = append(buf, f.preJSON...)
 		buf = l.appendKVPairsJSON(buf, kv)
+		if f.preTruncated {
+			buf = markTruncated(buf, true)
+		}
 		l.writeJSONTail(level, buf)
 		return
 	}
 
-	l.writeTextFields(level, msg, f.fields, kv)
+	l.writeTextFields(level, msg, f.fields, kv, ci)
 }
 
 // logPreFieldsCtx 写出"ctx 字段 + 预编码字段 + 额外 KV"的日志
@@ -270,21 +318,26 @@ func (l *Logger) logPreFieldsCtx(ctx context.Context, level LogLevel, msg string
 		return
 	}
 
+	// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
+	// 提到分支之前共用，两种格式与空字段分支都用同一份结果
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
+
 	if l.format == FormatJSON {
 		p := bytePool.Get().(*[]byte)
 		buf := (*p)[:0]
 		defer func() { putPooledBuf(&bytePool, p, buf) }()
-
-		var ci *callerInfo
-		if l.showCaller.Load() {
-			ci = l.findExternalCaller(2, 3)
-		}
 
 		buf = append(buf, '{')
 		buf = l.appendJSONHeader(buf, level, msg, ci)
 		buf = l.appendContextFieldsJSON(buf, ctx, kv, f.fields)
 		buf = append(buf, f.preJSON...)
 		buf = l.appendKVPairsJSON(buf, kv)
+		if f.preTruncated {
+			buf = markTruncated(buf, true)
+		}
 		l.writeJSONTail(level, buf)
 		return
 	}
@@ -293,14 +346,14 @@ func (l *Logger) logPreFieldsCtx(ctx context.Context, level LogLevel, msg string
 	if contextInfo := l.extractContextInfo(ctx); contextInfo != "" {
 		msg = contextInfo + msg
 	}
-	l.writeTextFields(level, msg, f.fields, kv)
+	l.writeTextFields(level, msg, f.fields, kv, ci)
 }
 
 // writeTextFields text 模式写出"预编码字段 + 额外 KV"
 // 字段按有序列表遍历，输出顺序稳定（改造前随 map 遍历每条都不同）
-func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, kv []any) {
+func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, kv []any, ci *callerInfo) {
 	if len(fields) == 0 && len(kv) == 0 {
-		l.ultraLog(level, msg)
+		l.ultraLog(level, msg, ci)
 		return
 	}
 
@@ -308,7 +361,7 @@ func (l *Logger) writeTextFields(level LogLevel, msg string, fields []logField, 
 	buf := (*p)[:0]
 	defer func() { putPooledBuf(&bytePool, p, buf) }()
 
-	buf = l.appendTextHeader(buf, level)
+	buf = l.appendTextHeader(buf, level, ci)
 	buf = l.appendSanitizedMessage(buf, msg, false)
 	buf = append(buf, kvBraceOpen...)
 
