@@ -802,28 +802,55 @@ func newCallerInfo(file string, line int, name string) *callerInfo {
 // internalCallerSentinel 内部帧缓存哨兵（file 为空，命中即跳过该帧）
 var internalCallerSentinel = &callerInfo{}
 
-// selfPkgPrefix 本包的 runtime 包路径前缀（含末尾 '.'），如
-// "github.com/kamalyes/go-logger."
+// selfModPrefix 本库的根包路径（即模块路径，**不含**末尾分隔符），如
+// "github.com/kamalyes/go-logger"
 //
-// 在 init 期由本包一个函数的 runtime 名称推导，编译期确定、与磁盘路径无关，
+// 在 init 期由根包一个函数的 runtime 名称推导，编译期确定、与磁盘路径无关，
 // 因此改名检出目录、git worktree、vendor 副本、fork 改模块名都不影响判定
-var selfPkgPrefix = computeSelfPkgPrefix()
+var selfModPrefix = computeSelfModPrefix()
 
-// computeSelfPkgPrefix 取本函数的 runtime 名称并截出包路径前缀
+// computeSelfModPrefix 取本函数的 runtime 名称并截出根包路径
 //
 // 包级函数的 runtime 名称形如 "<包路径>.<函数名>"，而包路径自身含点
-// （github.com/...），故按最后一个 '.' 切分恰好得到包路径 + '.'
+// （github.com/...），故按最后一个 '.' 切分恰好得到包路径
+// 必须由**包级函数**推导：方法的 runtime 名称形如
+// "<包路径>.(*Logger).Info"，按最后一个 '.' 切分只会得到 "<包路径>.(*Logger)"
 // 仅 init 期执行一次，热路径零成本。
-func computeSelfPkgPrefix() string {
+func computeSelfModPrefix() string {
 	var pcs [1]uintptr
 	if runtime.Callers(1, pcs[:]) < 1 {
 		return ""
 	}
 	fr, _ := runtime.CallersFrames(pcs[:]).Next()
 	if i := strings.LastIndex(fr.Function, "."); i >= 0 {
-		return fr.Function[:i+1]
+		return fr.Function[:i]
 	}
 	return ""
+}
+
+// isSelfFrame 判断 runtime 函数名是否属于本库（根包或任一子包）
+//
+// 要求 selfModPrefix 之后紧跟 '.' 或 '/'：
+//   - '.' 是根包的函数，如 "<mod>.(*Logger).Info"
+//   - '/' 是子包的函数，如 "<mod>/sink.(*consoleWriter).Write"
+//
+// 这个边界检查是**必须**的，不能退化成裸 HasPrefix：模块路径是另一个模块的
+// 前缀时会误判，本库就有现成的下游例子——
+// "github.com/kamalyes/go-logger-benchmark.BenchmarkGoLogger_KV10" 以
+// "github.com/kamalyes/go-logger" 开头，裸前缀匹配会把基准自身的帧当作内部帧
+// 跳过，caller 转而指向更上层的随机帧
+func isSelfFrame(function string) bool {
+	if selfModPrefix == "" || len(function) <= len(selfModPrefix) {
+		return false
+	}
+	if !strings.HasPrefix(function, selfModPrefix) {
+		return false
+	}
+	switch function[len(selfModPrefix)] {
+	case '.', '/':
+		return true
+	}
+	return false
 }
 
 // isInternalCaller 判断栈帧是否为需要跳过的内部调用
@@ -840,13 +867,13 @@ func computeSelfPkgPrefix() string {
 //
 // 注意：_test.go 文件即使属于本包也不跳过（测试代码本身就是调用者）
 // 该豁免必须保留且必须先于包路径判定——本包内测试函数的 runtime 名称
-// 同样带 selfPkgPrefix（外部测试包 pkg_test 因前缀含末尾 '.' 而天然不匹配）
+// 同样带本库根包前缀（外部测试包 pkg_test 的前缀边界是 '_'，由 isSelfFrame 天然排除）
 func isInternalCaller(file, function string) bool {
 	if strings.HasSuffix(file, "_test.go") {
 		return false
 	}
-	// 本包帧：按包路径前缀判定，与磁盘路径无关
-	if selfPkgPrefix != "" && strings.HasPrefix(function, selfPkgPrefix) {
+	// 本库帧：按包路径前缀判定（涵盖根包与全部子包），与磁盘路径无关
+	if isSelfFrame(function) {
 		return true
 	}
 	// Go 标准库 runtime/reflect/testing：GOROOT 下 src/<pkg>/ 布局稳定，仍按路径判定（跨平台：同时检查正斜杠与反斜杠）

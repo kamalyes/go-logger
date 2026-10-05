@@ -23,19 +23,59 @@ import (
 	"testing"
 )
 
-// TestSelfPkgPrefix_Derived 包前缀必须成功推导
+// TestSelfModPrefix_Derived 根包路径必须成功推导
 //
-// 推导失败（空值）会让本包帧判定整体退化为「全部不是内部帧」，
+// 推导失败（空值）会让本库帧判定整体退化为「全部不是内部帧」，
 // caller 将指向 logger 自身的最内层函数。
-func TestSelfPkgPrefix_Derived(t *testing.T) {
-	if selfPkgPrefix == "" {
-		t.Fatal("selfPkgPrefix 推导为空：本包帧判定会整体失效")
+func TestSelfModPrefix_Derived(t *testing.T) {
+	if selfModPrefix == "" {
+		t.Fatal("selfModPrefix 推导为空：本库帧判定会整体失效")
 	}
-	if !strings.HasSuffix(selfPkgPrefix, ".") {
-		t.Fatalf("selfPkgPrefix 必须以 '.' 结尾（用于区分 pkg 与 pkg_test），实得 %q", selfPkgPrefix)
+	if strings.HasSuffix(selfModPrefix, ".") {
+		t.Fatalf("selfModPrefix 不得含末尾 '.'：边界字符由 isSelfFrame 判定，实得 %q", selfModPrefix)
 	}
-	if !strings.Contains(selfPkgPrefix, "go-logger") {
-		t.Fatalf("selfPkgPrefix 应含模块名，实得 %q", selfPkgPrefix)
+	if !strings.Contains(selfModPrefix, "go-logger") {
+		t.Fatalf("selfModPrefix 应含模块名，实得 %q", selfModPrefix)
+	}
+}
+
+// TestIsSelfFrame_Subpackages 子包帧必须与根包帧一样被识别为本库
+//
+// 这是包结构拆分的回归：判定若退化成「前缀 + 末尾 '.'」，
+// <mod>/sink.xxx 这类子包帧不再匹配，子包里的函数会被当作外部调用者，
+// caller 静默指向库内部（如 sink/console.go:214）而非用户代码。
+func TestIsSelfFrame_Subpackages(t *testing.T) {
+	for _, fn := range []string{
+		selfModPrefix + ".(*Logger).Info",
+		selfModPrefix + ".appendJSONString",
+		selfModPrefix + "/sink.(*consoleWriter).Write",
+		selfModPrefix + "/sink.Flush",
+		selfModPrefix + "/level.Level.String",
+		selfModPrefix + "/console.(*Group).Info",
+		selfModPrefix + "/internal/redact.AppendJSONValue",
+		selfModPrefix + "/internal/encode.AppendTextSafe",
+	} {
+		if !isSelfFrame(fn) {
+			t.Errorf("本库帧未被识别，caller 会指向库内部: %q", fn)
+		}
+	}
+}
+
+// TestIsSelfFrame_PrefixNeighbours 模块路径以本库为前缀的「邻居模块」不得误判
+//
+// 这是边界检查的回归，而且不是假想输入：go-logger-benchmark 是本库的真实
+// 下游，它的 runtime 名称以 "github.com/kamalyes/go-logger" 开头。
+// 判定若退化成裸 HasPrefix，基准自身的帧会被当作内部帧跳过。
+func TestIsSelfFrame_PrefixNeighbours(t *testing.T) {
+	for _, fn := range []string{
+		selfModPrefix + "-benchmark.BenchmarkGoLogger_KV10",
+		selfModPrefix + "-extra.Helper",
+		selfModPrefix + "_test.TestExternal",
+		selfModPrefix, // 恰好等长：索引越界的边界
+	} {
+		if isSelfFrame(fn) {
+			t.Errorf("邻居模块帧被误判为本库，其调用点会被跳过: %q", fn)
+		}
 	}
 }
 
@@ -51,17 +91,17 @@ func TestIsInternalCaller_PathIndependent(t *testing.T) {
 		{
 			name:     "git worktree 路径",
 			file:     "/private/tmp/wt-abc123/logger.go",
-			function: selfPkgPrefix + "(*Logger).writeJSONEntry",
+			function: selfModPrefix + "." + "(*Logger).writeJSONEntry",
 		},
 		{
 			name:     "vendor 副本路径",
 			file:     "/app/vendor/github.com/kamalyes/logging/logger.go",
-			function: selfPkgPrefix + "appendJSONString",
+			function: selfModPrefix + "." + "appendJSONString",
 		},
 		{
 			name:     "改名的检出目录",
 			file:     "/home/ci/workspace/build-7/logger.go",
-			function: selfPkgPrefix + "(*Logger).appendJSONHeader",
+			function: selfModPrefix + "." + "(*Logger).appendJSONHeader",
 		},
 	}
 	for _, c := range cases {
@@ -89,6 +129,7 @@ func TestIsInternalCaller_UserCodeNotSkipped(t *testing.T) {
 		{"路径恰好含 go-logger 的用户代码", "/src/go-logger-demo/main.go", "example.com/demo.main"},
 		{"外部测试包", "/app/x/foo_x.go", "github.com/kamalyes/go-logger_test.TestExternal"},
 		{"同名前缀的其他模块", "/app/y/y.go", "github.com/kamalyes/go-logger-extra.Helper"},
+		{"下游基准仓库", "/app/b/bench_kv_test.go", "github.com/kamalyes/go-logger-benchmark.benchGoLogger"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -101,11 +142,11 @@ func TestIsInternalCaller_UserCodeNotSkipped(t *testing.T) {
 
 // TestIsInternalCaller_TestFileExempt 本包 _test.go 必须豁免
 //
-// 本包内测试函数的 runtime 名称同样带 selfPkgPrefix，若无 _test.go 豁免
+// 本包内测试函数的 runtime 名称同样带本库根包前缀，若无 _test.go 豁免
 // 会被判为内部帧，导致测试里的日志 caller 指向 logger 内部。
 // 该豁免必须先于包路径判定。
 func TestIsInternalCaller_TestFileExempt(t *testing.T) {
-	if isInternalCaller("/anywhere/logger_test.go", selfPkgPrefix+"TestShowCaller") {
+	if isInternalCaller("/anywhere/logger_test.go", selfModPrefix+"."+"TestShowCaller") {
 		t.Error("本包 _test.go 被判为内部帧：豁免未生效或顺序错误")
 	}
 }
