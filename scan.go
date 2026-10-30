@@ -10,7 +10,11 @@
  */
 package logger
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/kamalyes/go-toolbox/pkg/desensitize"
+)
 
 // 设计要点：单遍、零分配、无回溯
 //
@@ -70,7 +74,7 @@ func mayContainSensitiveText(s string) bool {
 		case c == '=':
 			// 仅当 '=' 左侧确实是凭据键名时才放行。若把裸 '=' 当信号，
 			// 文本日志里几乎每行都含 '='，预过滤就等于没有
-			if isCredentialKey(assignmentKeyBefore(s, i)) {
+			if desensitize.IsCredentialKey(assignmentKeyBefore(s, i)) {
 				return true
 			}
 		}
@@ -156,7 +160,7 @@ func appendScanned(buf []byte, s string, emit func([]byte, string) []byte) []byt
 		token := s[start:i]
 
 		if prevAuthScheme {
-			buf = append(buf, redacted...)
+			buf = append(buf, desensitize.RedactedText...)
 			prevAuthScheme = false
 			continue
 		}
@@ -205,18 +209,18 @@ func appendScannedToken(buf []byte, token string, emit func([]byte, string) []by
 	case isCredentialAssignment(token):
 		return appendAssignment(buf, token, emit)
 	case looksLikeJWT(token):
-		return append(buf, redacted...)
+		return append(buf, desensitize.RedactedText...)
 	case strings.IndexByte(token, '@') > 0:
 		// 末尾的标点不属于邮箱本体，剥离后再掩码
 		core, suffix := trimTrailingPunct(token)
 		if strings.IndexByte(core, '@') > 0 {
-			buf = appendMaskedEmail(buf, core)
+			buf = desensitize.AppendMaskedEmail(buf, core)
 			return emit(buf, suffix)
 		}
 		return emit(buf, token)
 	case looksLikePhone(token):
 		core, suffix := trimTrailingPunct(token)
-		buf = appendMaskedPhone(buf, core)
+		buf = desensitize.AppendMaskedPhone(buf, core)
 		return emit(buf, suffix)
 	}
 	return emit(buf, token)
@@ -226,14 +230,14 @@ func appendScannedToken(buf []byte, token string, emit func([]byte, string) []by
 // 日志里 "password=hunter2"、"token=abc" 这类赋值片段常由 error 文本或查询串拼接而来
 func isCredentialAssignment(token string) bool {
 	eq := strings.IndexByte(token, '=')
-	return eq > 0 && isCredentialKey(token[:eq])
+	return eq > 0 && desensitize.IsCredentialKey(token[:eq])
 }
 
 // appendAssignment 保留键名，把 '=' 之后的值整体擦除
 func appendAssignment(buf []byte, token string, emit func([]byte, string) []byte) []byte {
 	eq := strings.IndexByte(token, '=')
 	buf = emit(buf, token[:eq+1])
-	return append(buf, redacted...)
+	return append(buf, desensitize.RedactedText...)
 }
 
 // trimTrailingPunct 剥离 token 末尾的标点（句号、冒号等）
@@ -342,7 +346,7 @@ func looksLikePhone(token string) bool {
 func appendSanitizedURL(buf []byte, raw string, emit func([]byte, string) []byte) []byte {
 	url, suffix := trimTrailingPunct(raw)
 	if isPrivateURL(url) {
-		buf = append(buf, redacted...)
+		buf = append(buf, desensitize.RedactedText...)
 		return emit(buf, suffix)
 	}
 
@@ -357,7 +361,7 @@ func appendSanitizedURL(buf []byte, raw string, emit func([]byte, string) []byte
 	// userinfo（user:pass@host）整体擦除
 	authority := url[schemeEnd:authorityEnd]
 	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
-		buf = append(buf, redacted...)
+		buf = append(buf, desensitize.RedactedText...)
 		buf = append(buf, '@')
 		authority = authority[at+1:]
 	}
@@ -394,8 +398,8 @@ func appendSanitizedQuery(buf []byte, query string, emit func([]byte, string) []
 		buf = emit(buf, name)
 		if hasValue {
 			buf = append(buf, '=')
-			if isCredentialKey(name) {
-				buf = append(buf, redacted...)
+			if desensitize.IsCredentialKey(name) {
+				buf = append(buf, desensitize.RedactedText...)
 			} else {
 				buf = emit(buf, value)
 			}
@@ -425,7 +429,7 @@ func isPrivateURL(url string) bool {
 		if eq := strings.IndexByte(param, '='); eq >= 0 {
 			name = param[:eq]
 		}
-		if hasNormalizedSuffix(name, "signature") {
+		if desensitize.HasNormalizedSuffix(name, "signature") {
 			return true
 		}
 	}

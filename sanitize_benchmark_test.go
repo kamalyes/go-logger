@@ -10,7 +10,11 @@
  */
 package logger
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kamalyes/go-toolbox/pkg/desensitize"
+)
 
 // sanitizeBenchLogger 构造指定脱敏强度的基准 Logger（上限保持默认开启）
 func sanitizeBenchLogger(mode SanitizeMode) *Logger {
@@ -29,7 +33,7 @@ func sanitizeBenchLogger(mode SanitizeMode) *Logger {
 func BenchmarkSanitize_KeyMiss(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
-		_ = actionForKey("region")
+		_ = desensitize.ActionForKey("region")
 	}
 }
 
@@ -37,7 +41,7 @@ func BenchmarkSanitize_KeyMiss(b *testing.B) {
 func BenchmarkSanitize_KeyExactHit(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
-		_ = actionForKey("access_token")
+		_ = desensitize.ActionForKey("access_token")
 	}
 }
 
@@ -45,7 +49,7 @@ func BenchmarkSanitize_KeyExactHit(b *testing.B) {
 func BenchmarkSanitize_KeyCamelHit(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
-		_ = actionForKey("refreshToken")
+		_ = desensitize.ActionForKey("refreshToken")
 	}
 }
 
@@ -53,7 +57,7 @@ func BenchmarkSanitize_KeyCamelHit(b *testing.B) {
 func BenchmarkSanitize_KeySuffixHit(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
-		_ = actionForKey("wx_app_secret")
+		_ = desensitize.ActionForKey("wx_app_secret")
 	}
 }
 
@@ -61,7 +65,7 @@ func BenchmarkSanitize_KeySuffixHit(b *testing.B) {
 func BenchmarkSanitize_KeyOpsVisible(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
-		_ = actionForKey("idempotency_key")
+		_ = desensitize.ActionForKey("idempotency_key")
 	}
 }
 

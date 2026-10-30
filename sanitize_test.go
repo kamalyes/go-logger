@@ -14,6 +14,10 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/kamalyes/go-toolbox/pkg/desensitize"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestActionForKey_Credentials 凭据类字段名必须整体擦除，大小写与分隔符变体一视同仁
@@ -39,7 +43,7 @@ func TestActionForKey_Credentials(t *testing.T) {
 		"app_secret", "user_password", "cdn_signed_url", "wx_app_key",
 		"my_privateKey", "upstream_credentials", "req_signature",
 	} {
-		if got := actionForKey(key); got != wipeValue {
+		if got := desensitize.ActionForKey(key); got != desensitize.WipeValue {
 			t.Errorf("字段名 %q 应整体擦除，实得动作 %d", key, got)
 		}
 	}
@@ -48,12 +52,12 @@ func TestActionForKey_Credentials(t *testing.T) {
 // TestActionForKey_PII 联系方式类字段名应掩码而非整体擦除（保留尾部便于对号）
 func TestActionForKey_PII(t *testing.T) {
 	for _, key := range []string{"phone", "mobile", "phone_number", "customer_phone", "receiver_phone", "tel"} {
-		if got := actionForKey(key); got != maskPhone {
+		if got := desensitize.ActionForKey(key); got != desensitize.MaskPhone {
 			t.Errorf("字段名 %q 应按号码掩码，实得动作 %d", key, got)
 		}
 	}
 	for _, key := range []string{"email", "email_address", "contact_email", "customer_email", "mail"} {
-		if got := actionForKey(key); got != maskEmail {
+		if got := desensitize.ActionForKey(key); got != desensitize.MaskEmail {
 			t.Errorf("字段名 %q 应按邮箱掩码，实得动作 %d", key, got)
 		}
 	}
@@ -75,7 +79,7 @@ func TestActionForKey_OpsFieldsVisible(t *testing.T) {
 		"user_id", "order_id", "trace_id", "request_id", "player_id", "ticket_id",
 		"method", "path", "duration_ms", "level", "topic", "offset", "region", "env",
 	} {
-		if got := actionForKey(key); got != keepAsIs {
+		if got := desensitize.ActionForKey(key); got != desensitize.KeepAsIs {
 			t.Errorf("运维字段 %q 必须保持可见，实得动作 %d", key, got)
 		}
 	}
@@ -83,16 +87,16 @@ func TestActionForKey_OpsFieldsVisible(t *testing.T) {
 
 // TestActionForKey_LongestSuffixWins 运维豁免后缀比竞争的敏感后缀更长，应优先生效
 func TestActionForKey_LongestSuffixWins(t *testing.T) {
-	cases := map[string]redactAction{
-		"my_public_key":     keepAsIs,  // publickey 比 ... 更长
-		"user_cache_key":    keepAsIs,  // cachekey
-		"order_status_code": keepAsIs,  // statuscode
-		"my_api_key":        wipeValue, // apikey
-		"user_secret_key":   wipeValue, // secretkey
-		"sms_passcode":      wipeValue, // passcode
+	cases := map[string]desensitize.KeyAction{
+		"my_public_key":     desensitize.KeepAsIs,  // publickey 比 ... 更长
+		"user_cache_key":    desensitize.KeepAsIs,  // cachekey
+		"order_status_code": desensitize.KeepAsIs,  // statuscode
+		"my_api_key":        desensitize.WipeValue, // apikey
+		"user_secret_key":   desensitize.WipeValue, // secretkey
+		"sms_passcode":      desensitize.WipeValue, // passcode
 	}
 	for key, want := range cases {
-		if got := actionForKey(key); got != want {
+		if got := desensitize.ActionForKey(key); got != want {
 			t.Errorf("字段名 %q 期望动作 %d，实得 %d", key, want, got)
 		}
 	}
@@ -169,7 +173,7 @@ func TestSanitize_TextMode(t *testing.T) {
 	if strings.Contains(out, "hunter2") {
 		t.Errorf("text 模式凭据泄漏\n原文: %s", out)
 	}
-	for _, want := range []string{redacted, "***8000", "uid: 1"} {
+	for _, want := range []string{desensitize.RedactedText, "***8000", "uid: 1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("期望包含 %q\n原文: %s", want, out)
 		}
@@ -182,13 +186,13 @@ func TestMaskPhone(t *testing.T) {
 		"13800138000":       "***8000",
 		"+86 138-0013-8000": "***8000",
 		"138 0013 8000":     "***8000",
-		"1234":              redacted, // 数字不足 5 位无从掩码
-		"":                  redacted,
-		"abc":               redacted,
+		"1234":              desensitize.RedactedText, // 数字不足 5 位无从掩码
+		"":                  desensitize.RedactedText,
+		"abc":               desensitize.RedactedText,
 	}
 	for in, want := range cases {
-		if got := string(appendMaskedPhone(nil, in)); got != want {
-			t.Errorf("appendMaskedPhone(%q) = %q，期望 %q", in, got, want)
+		if got := string(desensitize.AppendMaskedPhone(nil, in)); got != want {
+			t.Errorf("desensitize.AppendMaskedPhone(%q) = %q，期望 %q", in, got, want)
 		}
 	}
 }
@@ -199,13 +203,13 @@ func TestMaskEmail(t *testing.T) {
 		"alice@example.com": "a***@example.com",
 		"张三@example.com":    "张***@example.com",
 		"a@b.co":            "a***@b.co",
-		"@example.com":      redacted,
-		"alice@":            redacted,
-		"noatsign":          redacted,
+		"@example.com":      desensitize.RedactedText,
+		"alice@":            desensitize.RedactedText,
+		"noatsign":          desensitize.RedactedText,
 	}
 	for in, want := range cases {
-		if got := string(appendMaskedEmail(nil, in)); got != want {
-			t.Errorf("appendMaskedEmail(%q) = %q，期望 %q", in, got, want)
+		if got := string(desensitize.AppendMaskedEmail(nil, in)); got != want {
+			t.Errorf("desensitize.AppendMaskedEmail(%q) = %q，期望 %q", in, got, want)
 		}
 	}
 }
@@ -213,13 +217,13 @@ func TestMaskEmail(t *testing.T) {
 // TestRegisterSensitiveKeys 自定义敏感字段名生效
 func TestRegisterSensitiveKeys(t *testing.T) {
 	const key = "my_domain_voucher"
-	if actionForKey(key) != keepAsIs {
+	if desensitize.ActionForKey(key) != desensitize.KeepAsIs {
 		t.Fatalf("前置条件不成立：%q 本应不敏感", key)
 	}
 	RegisterSensitiveKeys(key)
-	t.Cleanup(func() { delete(exactKeyRules, "mydomainvoucher") })
+	t.Cleanup(func() { UnregisterSensitiveKeys(key) })
 
-	if got := actionForKey(key); got != wipeValue {
+	if got := desensitize.ActionForKey(key); got != desensitize.WipeValue {
 		t.Fatalf("注册后 %q 应整体擦除，实得动作 %d", key, got)
 	}
 }
@@ -273,7 +277,7 @@ func TestScan_Values(t *testing.T) {
 		{
 			name:    "Bearer 凭据",
 			in:      "retry with Bearer eyJhbGciOiJIUzI1NiJ9 failed",
-			want:    "Bearer " + redacted,
+			want:    "Bearer " + desensitize.RedactedText,
 			notWant: "eyJhbGciOiJIUzI1NiJ9",
 		},
 		{
@@ -296,19 +300,19 @@ func TestScan_Values(t *testing.T) {
 		{
 			name:    "带签名的私有链接整体擦除",
 			in:      "get https://cdn.example.com/f?signature=abc&id=7 now",
-			want:    redacted,
+			want:    desensitize.RedactedText,
 			notWant: "signature=abc",
 		},
 		{
 			name:    "普通链接保留主机与路径",
 			in:      "call https://api.example.com/v1/users?page=2 ok",
 			want:    "https://api.example.com/v1/users?page=2",
-			notWant: redacted,
+			notWant: desensitize.RedactedText,
 		},
 		{
 			name:    "链接里的凭据参数只擦值",
 			in:      "call https://api.example.com/v1/x?access_token=at_secret&page=2 ok",
-			want:    "access_token=" + redacted,
+			want:    "access_token=" + desensitize.RedactedText,
 			notWant: "at_secret",
 		},
 		{
@@ -319,7 +323,7 @@ func TestScan_Values(t *testing.T) {
 		{
 			name:    "key=value 赋值",
 			in:      "config password=hunter2 loaded",
-			want:    "password=" + redacted,
+			want:    "password=" + desensitize.RedactedText,
 			notWant: "hunter2",
 		},
 		{
@@ -404,8 +408,132 @@ func TestScan_BasicAuthScheme(t *testing.T) {
 		if strings.Contains(got, leaked) {
 			t.Errorf("凭据泄漏\n输入: %s\n实得: %s", in, got)
 		}
-		if !strings.Contains(got, redacted) {
+		if !strings.Contains(got, desensitize.RedactedText) {
 			t.Errorf("应补 [REDACTED]\n输入: %s\n实得: %s", in, got)
 		}
 	}
+}
+
+// TestSanitize_FingerprintAndEncryptActions 指纹与可还原加密两档在日志里生效且不泄漏
+//
+// 这两个 KeyAction 是 go-desensitize 新增的，本库的两处分派必须同步跟上：
+// 漏改 switch 会落到 default 分支输出明文 —— 编译通过、其它测试也过，但静默泄漏
+// 因此这里逐路径断言原值不在输出里
+//
+// [EN] Both actions are new in go-desensitize and this library's two dispatch
+// sites must follow: a missed switch case falls through to the default and
+// emits plaintext, which compiles and passes every other test while leaking
+func TestSanitize_FingerprintAndEncryptActions(t *testing.T) {
+	const sess = "sess-abc123def456"
+
+	t.Run("指纹：可关联不可还原", func(t *testing.T) {
+		desensitize.OverrideKeyAction("session_id", desensitize.MaskFingerprint)
+		t.Cleanup(func() { desensitize.OverrideKeyAction("session_id", desensitize.WipeValue) })
+
+		for _, format := range []FormatType{FormatJSON, FormatText} {
+			var buf bytes.Buffer
+			l := NewLogger().WithOutput(&buf).WithFormat(format).WithColorful(false).WithShowCaller(false)
+			l.InfoKV("req", "session_id", sess, "user_id", "u-1001")
+			out := buf.String()
+
+			assert.NotContains(t, out, sess, "%v 格式下会话原值不得出现", format)
+			assert.Contains(t, out, "***", "应产出指纹")
+			assert.Contains(t, out, "u-1001", "关联标识应保持可见")
+
+			// 同一会话两次输出的指纹一致，这是可关联的前提
+			var buf2 bytes.Buffer
+			l2 := NewLogger().WithOutput(&buf2).WithFormat(format).WithColorful(false).WithShowCaller(false)
+			l2.InfoKV("req", "session_id", sess)
+			fp1 := extractFingerprint(out)
+			fp2 := extractFingerprint(buf2.String())
+			assert.NotEmpty(t, fp1)
+			assert.Equal(t, fp1, fp2, "%v 格式下同一会话指纹须一致", format)
+		}
+	})
+
+	t.Run("加密：未装配密钥时失败关闭", func(t *testing.T) {
+		desensitize.ClearDefaultCipher()
+		desensitize.OverrideKeyAction("session_id", desensitize.MaskEncrypt)
+		t.Cleanup(func() {
+			desensitize.ClearDefaultCipher()
+			desensitize.OverrideKeyAction("session_id", desensitize.WipeValue)
+		})
+
+		for _, format := range []FormatType{FormatJSON, FormatText} {
+			var buf bytes.Buffer
+			l := NewLogger().WithOutput(&buf).WithFormat(format).WithColorful(false).WithShowCaller(false)
+			l.InfoKV("req", "session_id", sess)
+			out := buf.String()
+			assert.NotContains(t, out, sess, "%v 格式下未装配密钥不得留明文", format)
+			assert.Contains(t, out, desensitize.RedactedText, "应整体擦除")
+		}
+	})
+
+	t.Run("加密：装配后可关联且可还原", func(t *testing.T) {
+		desensitize.ClearDefaultCipher()
+		key := []byte("0123456789abcdef0123456789abcdef")
+		if err := desensitize.SetDefaultCipher(key); err != nil {
+			t.Fatal(err)
+		}
+		desensitize.OverrideKeyAction("session_id", desensitize.MaskEncrypt)
+		t.Cleanup(func() {
+			desensitize.ClearDefaultCipher()
+			desensitize.OverrideKeyAction("session_id", desensitize.WipeValue)
+		})
+
+		var buf, buf2 bytes.Buffer
+		NewLogger().WithOutput(&buf).WithFormat(FormatJSON).WithColorful(false).WithShowCaller(false).
+			InfoKV("req", "session_id", sess)
+		NewLogger().WithOutput(&buf2).WithFormat(FormatJSON).WithColorful(false).WithShowCaller(false).
+			InfoKV("req", "session_id", sess)
+
+		out, out2 := buf.String(), buf2.String()
+		assert.NotContains(t, out, sess)
+
+		sealed := extractSealed(out)
+		require.NotEmpty(t, sealed, "应产出带标识的密文，实得 %q", out)
+		assert.Equal(t, sealed, extractSealed(out2), "确定性加密须让同一会话跨行一致")
+
+		back, err := desensitize.DefaultCipher().Decrypt(sealed)
+		require.NoError(t, err)
+		assert.Equal(t, sess, back, "事故复盘时持密钥须能还原身份")
+	})
+}
+
+// extractFingerprint 从日志行里取出 ***xxxxxxxx 形态的指纹
+func extractFingerprint(line string) string {
+	i := strings.Index(line, "***")
+	if i < 0 {
+		return ""
+	}
+	rest := line[i+3:]
+	end := 0
+	for end < len(rest) && end < 8 {
+		c := rest[end]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+			end++
+			continue
+		}
+		break
+	}
+	if end == 0 {
+		return ""
+	}
+	return line[i : i+3+end]
+}
+
+// extractSealed 从日志行里取出 enc:v1:... 形态的密文
+func extractSealed(line string) string {
+	i := strings.Index(line, "enc:v1:")
+	if i < 0 {
+		return ""
+	}
+	rest := line[i:]
+	for j := 0; j < len(rest); j++ {
+		c := rest[j]
+		if c == '"' || c == ' ' || c == '\n' || c == '}' {
+			return rest[:j]
+		}
+	}
+	return rest
 }
