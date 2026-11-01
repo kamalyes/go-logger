@@ -115,6 +115,19 @@ func BenchmarkText_InfoKV_WithCaller(b *testing.B) {
 	}
 }
 
+// text + ctx 是先前唯一没有常驻基准的 caller 入口组合，
+// 栈窗口在这条路径上落空时输出仍然正确，只是退化成完整栈回溯，
+// 没有基准就没人看得见这 4 倍开销——留住它，下次回归立刻现形
+func BenchmarkText_InfoContextKV_WithCaller(b *testing.B) {
+	l := benchLogger(FormatText, true)
+	ctx := context.Background()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.InfoContextKV(ctx, "数据库查询", "table", "users", "rows", 42, "cost_ms", 3)
+	}
+}
+
 // ==================== gRPC metadata fallback 场景 ====================
 // 线上（apex-notify-service 5w 连接压测）heap profile 铁证：context 提取路径的
 // metadata.FromIncomingContext 全量 MD 深拷贝是 go-logger 热路径的主要分配来源。

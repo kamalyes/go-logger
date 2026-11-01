@@ -1211,15 +1211,39 @@ func (l *Logger) FatalContext(ctx context.Context, format string, args ...any) {
 // ============================================================================
 
 // logWithKV 极简键值对实现 - 零分配优化
-func (l *Logger) logWithKV(level LogLevel, msg string, keysAndValues ...any) {
+//
+// ci 允许调用方传入**已解析好的** caller：为 nil 时本函数自己按 (2,3) 解析
+//
+// 为什么需要这个参数，而不是一律自解析：栈窗口是按"本帧之上恰为 [入口API, 用户]"
+// 算的，谁多垫一层，窗口就落空并退化成完整回溯
+// logWithContextKV 的 text 分支正是多垫了一层——它自己已经处于
+// [logWithContextKV, 入口API, 用户] 的位置，再委托到这里就变成三层，
+// 于是 (2,3) 指向 logWithContextKV 而不是用户帧
+// 实测这一落空让 text 模式的 ctx 日志从 218 纳秒涨到 885 纳秒（4.1 倍），
+// 其中 64% 的时间在 runtime.Callers 的完整栈回溯里，而输出的 caller **仍然正确**，
+// 所以没有任何测试会发现它——这也是它能存活的原因
+//
+// 为什么是加参数而不是把函数体抽成 helper：抽 helper 会新增一层栈帧，
+// 把同一个问题搬给本函数内部对 logWithFields 的委托
+//
+// [EN] ci lets a caller pass an already-resolved caller; a nil value makes this function
+// resolve it at (2,3) itself. The window assumes the two frames above are the entry API and the
+// user, so any extra layer makes it miss and fall back to a full traceback. The text branch of
+// logWithContextKV is exactly one layer deeper, sitting at [logWithContextKV, entry API, user],
+// so delegating here made (2,3) point at logWithContextKV rather than the user. That miss was
+// measured taking text-mode contextual logging from 218 to 885 nanoseconds, a factor of 4.1,
+// with 64% of the time inside runtime.Callers doing a full traceback — while the reported
+// caller stayed correct, which is why no test caught it and why it survived. A parameter rather
+// than an extracted helper, because a helper would add a frame and move the same problem onto
+// this function's own delegation to logWithFields
+func (l *Logger) logWithKV(level LogLevel, msg string, ci *callerInfo, keysAndValues ...any) {
 	if level < LogLevel(l.level.Load()) {
 		return
 	}
 
 	// caller 浅层定位：本帧之上恰为 [入口API, 用户] 两帧，(2,3) 精确覆盖，
 	// 提到分支之前共用——空 KV 分支若交由 ultraLog 解析，其窗口会多出本层一帧而落空
-	var ci *callerInfo
-	if l.showCaller.Load() {
+	if ci == nil && l.showCaller.Load() {
 		ci = l.findExternalCaller(2, 3)
 	}
 
@@ -1437,7 +1461,19 @@ func (l *Logger) logWithContextKV(ctx context.Context, level LogLevel, msg strin
 		msg = contextInfo + msg
 	}
 
-	l.logWithKV(level, msg, keysAndValues...)
+	// caller 在本层解析，而不是交给 logWithKV
+	//
+	// 本帧之上恰为 [入口API, 用户]，与上面 JSON 分支用的是同一个窗口 (2,3)
+	// 交给 logWithKV 自解析会多垫一层而落空，详见 logWithKV 的说明
+	//
+	// [EN] Resolved here rather than in logWithKV, the two frames above being the entry API and
+	// the user, the same (2,3) window the JSON branch uses. Letting logWithKV resolve would add
+	// a layer and miss; see the note on logWithKV
+	var ci *callerInfo
+	if l.showCaller.Load() {
+		ci = l.findExternalCaller(2, 3)
+	}
+	l.logWithKV(level, msg, ci, keysAndValues...)
 }
 
 // ============================================================================
@@ -1449,7 +1485,7 @@ func (l *Logger) DebugKV(msg string, keysAndValues ...any) {
 	if LogLevel(l.level.Load()) > DEBUG {
 		return
 	}
-	l.logWithKV(DEBUG, msg, keysAndValues...)
+	l.logWithKV(DEBUG, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) DebugContextKV(ctx context.Context, msg string, keysAndValues ...any) {
@@ -1463,7 +1499,7 @@ func (l *Logger) InfoKV(msg string, keysAndValues ...any) {
 	if LogLevel(l.level.Load()) > INFO {
 		return
 	}
-	l.logWithKV(INFO, msg, keysAndValues...)
+	l.logWithKV(INFO, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) InfoContextKV(ctx context.Context, msg string, keysAndValues ...any) {
@@ -1477,7 +1513,7 @@ func (l *Logger) WarnKV(msg string, keysAndValues ...any) {
 	if LogLevel(l.level.Load()) > WARN {
 		return
 	}
-	l.logWithKV(WARN, msg, keysAndValues...)
+	l.logWithKV(WARN, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) WarnContextKV(ctx context.Context, msg string, keysAndValues ...any) {
@@ -1491,7 +1527,7 @@ func (l *Logger) ErrorKV(msg string, keysAndValues ...any) {
 	if LogLevel(l.level.Load()) > ERROR {
 		return
 	}
-	l.logWithKV(ERROR, msg, keysAndValues...)
+	l.logWithKV(ERROR, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues ...any) {
@@ -1502,7 +1538,7 @@ func (l *Logger) ErrorContextKV(ctx context.Context, msg string, keysAndValues .
 }
 
 func (l *Logger) FatalKV(msg string, keysAndValues ...any) {
-	l.logWithKV(FATAL, msg, keysAndValues...)
+	l.logWithKV(FATAL, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) FatalContextKV(ctx context.Context, msg string, keysAndValues ...any) {
@@ -1570,7 +1606,7 @@ func (l *Logger) LogKV(level LogLevel, msg string, keysAndValues ...any) {
 	if level < LogLevel(l.level.Load()) {
 		return
 	}
-	l.logWithKV(level, msg, keysAndValues...)
+	l.logWithKV(level, msg, nil, keysAndValues...)
 }
 
 func (l *Logger) LogWithFields(level LogLevel, msg string, fields map[string]any) {
